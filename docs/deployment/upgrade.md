@@ -69,7 +69,7 @@ Edit `deploy/docker/docker-compose.yml` to revert the image tag:
 ```yaml
 services:
   buzz-agent-prime:
-    image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0  # previous version
+    image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0 # previous version
 ```
 
 ### 2. Recreate the container
@@ -169,11 +169,11 @@ version wrote incompatible state:
 When upgrading, check whether upstream pins changed. See
 [compatibility.md](../compatibility.md) for the full matrix.
 
-| Upgrade path         | Pin changes?       | Action needed                              |
-| -------------------- | ------------------ | ---------------------------------------- |
-| 0.1.0 → 0.1.1         | Possible (patch)   | Review release notes; back up first.     |
-| 0.1.x → 0.2.0         | Likely (minor)     | Follow documented migration path.        |
-| 0.x → 1.0.0          | Expected (major)   | Full migration guide + state migration.  |
+| Upgrade path  | Pin changes?     | Action needed                           |
+| ------------- | ---------------- | --------------------------------------- |
+| 0.1.0 → 0.1.1 | Possible (patch) | Review release notes; back up first.    |
+| 0.1.x → 0.2.0 | Likely (minor)   | Follow documented migration path.       |
+| 0.x → 1.0.0   | Expected (major) | Full migration guide + state migration. |
 
 Contract-breaking changes always bump the minor version (v0.x → v0.x+1) and
 include a documented migration path.

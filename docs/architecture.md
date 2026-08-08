@@ -65,9 +65,9 @@ the session ends, the subprocess is terminated.
 
 **Session routing:**
 
-| Session has `_meta.sessionTitle`? | Behaviour                                   |
-| --------------------------------- | ------------------------------------------- |
-| Yes (named channel)               | Persistent: state is kept across restarts.  |
+| Session has `_meta.sessionTitle`? | Behaviour                                      |
+| --------------------------------- | ---------------------------------------------- |
+| Yes (named channel)               | Persistent: state is kept across restarts.     |
 | No                                | Ephemeral: a new session is created each time. |
 
 Named-channel persistence relies on the state directory
@@ -143,6 +143,7 @@ permissions. `buzz-agent-prime` is not a security sandbox.**
   credentials.
 
 **Deployment hardening:**
+
 - Run with a non-root container user and a read-only root filesystem.
 - Use Kubernetes `SecurityContext` or Docker `--read-only` with `--tmpfs`
   for writable scratch space.

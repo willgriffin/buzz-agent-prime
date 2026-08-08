@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+
 import { execFileSync } from "node:child_process";
 import { resolveStatePaths, ensureStateDirs, isWritable } from "../state/paths.js";
 import { which } from "./which.js";

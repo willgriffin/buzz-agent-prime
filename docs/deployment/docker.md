@@ -128,16 +128,16 @@ multi-stage builds the image:
 All configuration is environment-based — v0.1 ships no configuration file.
 See the full [contracts](../contracts.md) for all variables.
 
-| Variable                         | Default                     | Purpose                              |
-| -------------------------------- | --------------------------- | ------------------------------------ |
+| Variable                         | Default                     | Purpose                             |
+| -------------------------------- | --------------------------- | ----------------------------------- |
 | `BUZZ_RELAY_URL`                 | `ws://localhost:3000`       | Relay WebSocket URL.                |
-| `BUZZ_PRIVATE_KEY`               | —                           | Agent Nostr identity (nsec or hex).  |
-| `BUZZ_ACP_RESPOND_TO`           | `owner-only`                | Inbound author gate.                |
+| `BUZZ_PRIVATE_KEY`               | —                           | Agent Nostr identity (nsec or hex). |
+| `BUZZ_ACP_RESPOND_TO`            | `owner-only`                | Inbound author gate.                |
 | `BUZZ_AGENT_PRIME_MAX_SESSIONS`  | `4`                         | Maximum concurrent sessions.        |
 | `BUZZ_AGENT_PRIME_STATE_DIR`     | `/var/lib/buzz-agent-prime` | Persistent state directory.         |
 | `BUZZ_AGENT_PRIME_WORKSPACE_DIR` | `<state>/workspace`         | Default session working directory.  |
 | `BUZZ_AGENT_PRIME_TMP_DIR`       | `<state>/tmp`               | Writable scratch space.             |
-| `BUZZ_ACP_HEARTBEAT_INTERVAL`   | `0`                         | Heartbeat interval (0=disabled).    |
+| `BUZZ_ACP_HEARTBEAT_INTERVAL`    | `0`                         | Heartbeat interval (0=disabled).    |
 
 ## Persistent state
 

@@ -108,11 +108,7 @@ export class SessionStore {
   }
 
   /** Create or update a session directory and its metadata. */
-  private createOrUpdate(
-    sessionId: string,
-    workDir: string,
-    sessionTitle: string,
-  ): SessionPaths {
+  private createOrUpdate(sessionId: string, workDir: string, sessionTitle: string): SessionPaths {
     const paths = this.sessionPaths(sessionId);
     for (const dir of [paths.dir, paths.workspaceDir, paths.kernelDir, paths.artifactsDir]) {
       mkdirSync(dir, { recursive: true });

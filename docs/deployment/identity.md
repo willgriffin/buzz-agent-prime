@@ -98,10 +98,10 @@ plain `Secret` manifests. Use:
 `owner-only`). This controls **who can send messages that the agent will
 process**:
 
-| Value         | Behaviour                                       |
-| ------------- | ----------------------------------------------- |
-| `owner-only`  | Only the key's owner can trigger the agent.    |
-| Others        | See the `buzz-acp` documentation for options. |
+| Value        | Behaviour                                     |
+| ------------ | --------------------------------------------- |
+| `owner-only` | Only the key's owner can trigger the agent.   |
+| Others       | See the `buzz-acp` documentation for options. |
 
 This is an access gate on message routing, not a security sandbox. The agent
 still runs with the container user's full permissions — see

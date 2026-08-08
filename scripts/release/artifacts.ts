@@ -63,7 +63,11 @@ export function sourceArtifacts(pkgName: string, version: string): ReleaseArtifa
 export function imageArtifacts(pkgName: string, version: string): ReleaseArtifact[] {
   const scoped = normalizeScopedName(pkgName);
   return [
-    { role: "image", name: `${scoped}-${version}.sbom.json`, description: "CycloneDX SBOM for the OCI image" },
+    {
+      role: "image",
+      name: `${scoped}-${version}.sbom.json`,
+      description: "CycloneDX SBOM for the OCI image",
+    },
     {
       role: "image",
       name: `${scoped}-${version}.provenance.json`,

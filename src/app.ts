@@ -1,4 +1,6 @@
 import { runAcpCommand } from "./acp/index.js";
+import { serve } from "./serve/serve.js";
+import { runDoctor } from "./serve/doctor.js";
 import { version } from "./version.js";
 
 export const COMMANDS = ["acp", "serve", "doctor", "version"] as const;
@@ -11,15 +13,14 @@ Usage:
 
 Commands:
   acp       Speak ACP v2 NDJSON over stdin/stdout (session multiplexer)
-  serve     Launch buzz-acp and supervise Prime sessions (issue #4)
-  doctor    Diagnose the runtime environment (issue #4)
+  serve     Launch buzz-acp and supervise Prime sessions
+  doctor    Diagnose the runtime environment
   version   Print the installed version
   help      Show this help
 `;
 
 /**
  * Dispatch a CLI invocation. Returns the process exit code.
- * `acp` and `version` are implemented; `serve` and `doctor` land in issue #4.
  */
 export async function run(argv: readonly string[]): Promise<number> {
   const [command] = argv;
@@ -36,15 +37,9 @@ export async function run(argv: readonly string[]): Promise<number> {
     case "acp":
       return runAcpCommand();
     case "serve":
-      process.stderr.write(
-        "buzz-agent-prime serve: not implemented yet (runtime supervision, issue #4)\n",
-      );
-      return 1;
+      return serve();
     case "doctor":
-      process.stderr.write(
-        "buzz-agent-prime doctor: not implemented yet (runtime diagnostics, issue #4)\n",
-      );
-      return 1;
+      return runDoctor();
     default:
       process.stderr.write(`buzz-agent-prime: unknown command '${command}'\n\n`);
       process.stderr.write(USAGE);

@@ -15,9 +15,7 @@ describe("sha256", () => {
   });
   it("computes the digest of known input", () => {
     const data = new TextEncoder().encode("hello");
-    expect(sha256(data)).toBe(
-      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    );
+    expect(sha256(data)).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
   });
 });
 
@@ -61,9 +59,7 @@ describe("verifyChecksums", () => {
     expect(result.mismatched).toEqual([]);
   });
   it("reports missing files", () => {
-    const recorded: ChecksumEntry[] = [
-      { digest: "0".repeat(64), filename: "missing.txt" },
-    ];
+    const recorded: ChecksumEntry[] = [{ digest: "0".repeat(64), filename: "missing.txt" }];
     const artifacts = new Map<string, Uint8Array>();
     const result = verifyChecksums(recorded, artifacts);
     expect(result.ok).toBe(false);
@@ -71,9 +67,7 @@ describe("verifyChecksums", () => {
   });
   it("reports mismatched digests", () => {
     const data = new TextEncoder().encode("test");
-    const recorded: ChecksumEntry[] = [
-      { digest: "0".repeat(64), filename: "test.txt" },
-    ];
+    const recorded: ChecksumEntry[] = [{ digest: "0".repeat(64), filename: "test.txt" }];
     const artifacts = new Map([["test.txt", data]]);
     const result = verifyChecksums(recorded, artifacts);
     expect(result.ok).toBe(false);

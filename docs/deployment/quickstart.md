@@ -43,10 +43,10 @@ export OPENAI_API_KEY=sk-…
 
 ### 3. Choose your deployment platform
 
-| Platform | Guide |
-| -------- | ----- |
-| Docker Compose (recommended for single-host) | [Docker Deployment](docker.md) |
-| Kubernetes (single-replica, persistent) | [Kubernetes Deployment](kubernetes.md) |
+| Platform                                     | Guide                                  |
+| -------------------------------------------- | -------------------------------------- |
+| Docker Compose (recommended for single-host) | [Docker Deployment](docker.md)         |
+| Kubernetes (single-replica, persistent)      | [Kubernetes Deployment](kubernetes.md) |
 
 ### 4. Deploy
 

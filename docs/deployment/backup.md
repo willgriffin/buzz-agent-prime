@@ -17,13 +17,13 @@ covers backup and restore procedures for Docker and Kubernetes.
 
 ### What to back up
 
-| Path        | Critical? | Notes                                              |
-| ----------- | --------- | -------------------------------------------------- |
-| `sessions/` | **Yes**   | Named-channel checkpoints; required to resume.     |
-| `repos/`    | **Yes**   | Local clones with work-in-progress; slow to rebuild.|
-| `artifacts/`| Optional  | Regeneratable, but may hold valuable outputs.     |
-| `workspace/`| Optional  | Working files; sessions can recreate as needed.    |
-| `tmp/`      | No        | Scratch space; safe to exclude from backups.        |
+| Path         | Critical? | Notes                                                |
+| ------------ | --------- | ---------------------------------------------------- |
+| `sessions/`  | **Yes**   | Named-channel checkpoints; required to resume.       |
+| `repos/`     | **Yes**   | Local clones with work-in-progress; slow to rebuild. |
+| `artifacts/` | Optional  | Regeneratable, but may hold valuable outputs.        |
+| `workspace/` | Optional  | Working files; sessions can recreate as needed.      |
+| `tmp/`       | No        | Scratch space; safe to exclude from backups.         |
 
 ### Named-channel vs. ephemeral sessions
 
@@ -166,7 +166,7 @@ metadata:
   name: buzz-agent-prime-backup
   namespace: buzz-agent-prime
 spec:
-  schedule: "0 2 * * *"      # Daily at 2 AM
+  schedule: "0 2 * * *" # Daily at 2 AM
   jobTemplate:
     spec:
       template:

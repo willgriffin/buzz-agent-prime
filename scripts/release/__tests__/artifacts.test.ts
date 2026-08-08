@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  sourceArtifacts,
-  imageArtifacts,
-  allArtifacts,
-  ghcrRepository,
-} from "../artifacts.js";
+import { sourceArtifacts, imageArtifacts, allArtifacts, ghcrRepository } from "../artifacts.js";
 
 const PKG = "@willgriffin/buzz-agent-prime";
 

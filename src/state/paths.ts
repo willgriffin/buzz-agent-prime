@@ -31,10 +31,7 @@ export function resolveWorkspaceDir(
 }
 
 /** Resolve the tmp directory (defaults to `<state>/tmp`). */
-export function resolveTmpDir(
-  stateDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
+export function resolveTmpDir(stateDir: string, env: NodeJS.ProcessEnv = process.env): string {
   return resolve(getVar("BUZZ_AGENT_PRIME_TMP_DIR", env) ?? join(stateDir, "tmp"));
 }
 

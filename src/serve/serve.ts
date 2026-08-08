@@ -1,15 +1,6 @@
-import {
-  resolveStatePaths,
-  ensureStateDirs,
-  isWritable,
-  type StatePaths,
-} from "../state/paths.js";
+import { resolveStatePaths, ensureStateDirs, isWritable, type StatePaths } from "../state/paths.js";
 import { SessionStore } from "../state/session.js";
-import {
-  resolveServeConfig,
-  buildBuzzAcpEnv,
-  type ServeConfig,
-} from "../state/config.js";
+import { resolveServeConfig, buildBuzzAcpEnv } from "../state/config.js";
 import { Supervisor } from "./supervisor.js";
 import { which } from "./which.js";
 

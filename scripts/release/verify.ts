@@ -13,9 +13,9 @@
  * @module scripts/release/verify
  */
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join, basename, resolve } from "node:path";
-import { parseChecksumFile, sha256, verifyChecksums, type VerifyResult } from "./checksums.js";
+import { readFileSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { parseChecksumFile, verifyChecksums, type VerifyResult } from "./checksums.js";
 import { tagForVersion, validateVersion, sourceArtifacts } from "./version.js";
 
 const PKG_NAME = "@willgriffin/buzz-agent-prime";
@@ -30,9 +30,7 @@ function parseArgs(argv: string[]): { version: string; dir: string } {
     } else if (a === "--dir" || a === "-d") {
       dir = argv[++i] ?? ".";
     } else if (a === "--help" || a === "-h") {
-      process.stdout.write(
-        "Usage: verify.ts --version <semver> [--dir <artifact-dir>]\n",
-      );
+      process.stdout.write("Usage: verify.ts --version <semver> [--dir <artifact-dir>]\n");
       process.exit(0);
     }
   }

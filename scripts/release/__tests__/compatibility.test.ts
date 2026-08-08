@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  checkCompatibility,
-  parseCompatibilityPins,
-  validatePin,
-} from "../compatibility.js";
+import { checkCompatibility, parseCompatibilityPins, validatePin } from "../compatibility.js";
 
 const MOCK_MD = `# Upstream Pins
 
@@ -44,9 +40,7 @@ describe("validatePin", () => {
   });
   it("accepts container digests", () => {
     expect(
-      validatePin(
-        "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      ),
+      validatePin("@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
     ).toBe(true);
   });
   it("accepts ref@sha format", () => {
@@ -77,10 +71,7 @@ describe("checkCompatibility", () => {
     expect(result.errors).toHaveLength(1);
   });
   it("fails on mutable pins", () => {
-    const badMd = MOCK_MD.replace(
-      "a18809e00ea30638584d87b3afea7285a9d7296c",
-      "latest",
-    );
+    const badMd = MOCK_MD.replace("a18809e00ea30638584d87b3afea7285a9d7296c", "latest");
     const result = checkCompatibility(badMd);
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes("prime-agent"))).toBe(true);

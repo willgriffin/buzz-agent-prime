@@ -7,10 +7,7 @@ import { join, delimiter } from "node:path";
  * Returns the absolute path to the first executable named `name` found in the
  * `PATH` directories, or `null` when not found.
  */
-export function which(
-  name: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
+export function which(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
   // If the name already contains a path separator, check it directly.
   if (name.includes("/") || (process.platform === "win32" && name.includes("\\"))) {
     return hasExec(name) ? name : null;

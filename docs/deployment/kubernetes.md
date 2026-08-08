@@ -89,7 +89,7 @@ metadata:
   name: buzz-agent-prime
   namespace: buzz-agent-prime
 spec:
-  replicas: 1                    # Do not scale above 1 in v0.1
+  replicas: 1 # Do not scale above 1 in v0.1
   serviceName: buzz-agent-prime
   selector:
     matchLabels:
@@ -219,14 +219,14 @@ procedures.
 
 Apply these security contexts:
 
-| Setting                        | Value     | Purpose                              |
-| ------------------------------ | --------- | ------------------------------------ |
-| `runAsNonRoot`                 | `true`    | Disallow running as root.            |
-| `runAsUser`                    | `1000`    | Non-root UID.                        |
-| `fsGroup`                      | `1000`    | Volume ownership.                    |
-| `readOnlyRootFilesystem`        | `true`    | Immutability of rootfs.             |
-| `allowPrivilegeEscalation`     | `false`   | No `setuid` escalation.             |
-| `capabilities.drop`            | `["ALL"]` | Drop all Linux capabilities.        |
+| Setting                    | Value     | Purpose                      |
+| -------------------------- | --------- | ---------------------------- |
+| `runAsNonRoot`             | `true`    | Disallow running as root.    |
+| `runAsUser`                | `1000`    | Non-root UID.                |
+| `fsGroup`                  | `1000`    | Volume ownership.            |
+| `readOnlyRootFilesystem`   | `true`    | Immutability of rootfs.      |
+| `allowPrivilegeEscalation` | `false`   | No `setuid` escalation.      |
+| `capabilities.drop`        | `["ALL"]` | Drop all Linux capabilities. |
 
 Additional recommendations:
 
@@ -251,6 +251,7 @@ v0.1 does not support horizontal scaling. Ensure `replicas: 1`. The
 multiplexer's session routing and state directory are inherently single-node.
 
 Scaling to multiple replicas would cause:
+
 - Duplicate relay connections under the same identity.
 - Conflicting session routing.
 - State directory races on a shared volume.

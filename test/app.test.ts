@@ -23,9 +23,17 @@ function capture(stdout: () => void): string {
 describe("buzz-agent-prime CLI (foundation contract)", () => {
   it("reserves the four public commands", async () => {
     // `acp` now launches the multiplexer (waits on stdin); test it separately.
-    for (const command of ["serve", "doctor", "version"]) {
-      const code = await run([command]);
-      expect([0, 1]).toContain(code);
+    // serve/doctor need a writable state dir; override to a test tmp path.
+    const oldStateDir = process.env.BUZZ_AGENT_PRIME_STATE_DIR;
+    process.env.BUZZ_AGENT_PRIME_STATE_DIR = "/tmp/buzz-test-state";
+    try {
+      for (const command of ["serve", "doctor", "version"]) {
+        const code = await run([command]);
+        expect([0, 1, 3]).toContain(code);
+      }
+    } finally {
+      if (oldStateDir) process.env.BUZZ_AGENT_PRIME_STATE_DIR = oldStateDir;
+      else delete process.env.BUZZ_AGENT_PRIME_STATE_DIR;
     }
   });
 
