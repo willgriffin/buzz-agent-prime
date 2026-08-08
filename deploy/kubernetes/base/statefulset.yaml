@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buzz-agent-prime
+spec:
+  serviceName: buzz-agent-prime
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buzz-agent-prime
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buzz-agent-prime
+    spec:
+      terminationGracePeriodSeconds: 30
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/tini", "--", "/usr/local/bin/buzz-agent-prime", "serve"]
+
+          envFrom:
+            - configMapRef:
+                name: buzz-agent-prime-config
+            - secretRef:
+                name: buzz-agent-prime-secrets
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/buzz-agent-prime
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+
+          livenessProbe:
+            exec:
+              command:
+                - /usr/local/bin/buzz-agent-prime
+                - doctor
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command:
+                - /usr/local/bin/buzz-agent-prime
+                - doctor
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 1
+
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: buzz-agent-prime-state
+        - name: workspace
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+
+  volumeClaimTemplates:
+    - metadata:
+        name: buzz-agent-prime-state
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi

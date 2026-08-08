@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: buzz-agents
+
+commonLabels:
+  app.kubernetes.io/name: buzz-agent-prime
+  app.kubernetes.io/version: "0.1.0"
+
+resources:
+  - statefulset.yaml
+  - service.yaml
+  - network-policy.yaml
+
+configMapGenerator:
+  - name: buzz-agent-prime-config
+    literals:
+      - BUZZ_RELAY_URL=wss://buzz.happyvertical.com
+      - BUZZ_AGENT_PRIME_MAX_SESSIONS="4"
+      - BUZZ_ACP_RESPOND_TO=owner-only
+      - BUZZ_ACP_HEARTBEAT_INTERVAL="0"
+
+secretGenerator:
+  - name: buzz-agent-prime-secrets
+    literals: []
+    # Replace with a real secret provider (Warden/ExternalSecret).
+    # Literals here are placeholders — never commit real values.
+    #   BUZZ_PRIVATE_KEY=nsec1...
+    #   OPENAI_API_KEY=sk-...

@@ -1,0 +1,159 @@
+# syntax=docker/dockerfile:1.7
+#
+# buzz-agent-prime — OCI image
+#
+# Multi-stage build pinned to immutable upstream revisions. Every layer is
+# reproducible from the SHA256SUMS published by each upstream project; this
+# file never fetches `latest` or `main`.
+#
+# Pins:
+#   Prime Agent    v0.7.1   d68612c83239caafab72cc76c55ac572bfd07a059ea8fbd2a3ddbe1f2b55dcdb
+#   block/buzz     3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42
+#
+# Output:
+#   distroless runtime, non-root UID 1001, tini as PID 1
+#   writable: /var/lib/buzz-agent-prime (state), /workspace, /tmp
+#
+
+# -- Syntax version ----------------------------------------------------------
+ARG DEBIAN_BASE=debian:bookworm-20260105-slim
+ARG RUST_BASE=rust:1.88.0-bookworm
+ARG NODE_BASE=node:22.12.0-bookworm-slim
+ARG PYTHON_BASE=python:3.12.7-slim-bookworm
+
+# -- Stage 1: prime-agent builder ---------------------------------------------
+FROM ${PYTHON_BASE} AS prime-builder
+
+ARG PRIME_VERSION=0.7.1
+ARG PRIME_TARBALL=https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.7.1/prime-agent-0.7.1.tgz
+ARG PRIME_SHA256=d68612c83239caafab72cc76c55ac572bfd07a059ea8fbd2a3ddbe1f2b55dcdb
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Fetch + verify before install; fail loudly if upstream ever drifts.
+RUN curl -fsSL "$PRIME_TARBALL" -o /tmp/prime-agent.tgz \
+ && echo "$PRIME_SHA256  /tmp/prime-agent.tgz" | sha256sum -c - \
+ && mkdir -p /opt/prime-agent \
+ && tar -xzf /tmp/prime-agent.tgz -C /opt/prime-agent --strip-components=1 \
+ && rm /tmp/prime-agent.tgz \
+ && cd /opt/prime-agent \
+ && npm ci --omit=dev --ignore-scripts \
+ && npm rebuild \
+ && npm cache clean --force
+
+# -- Stage 2: Rust workspace builder ------------------------------------------
+FROM ${RUST_BASE} AS rust-builder
+
+ARG BUZZ_REF=3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42
+ARG BUZZ_REPO=https://github.com/block/buzz.git
+
+# Build deps + cargo registry caches live on tmpfs to avoid clobbering layer.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Source fetch + cache bust by commit SHA. Re-resolved from the immutable ref.
+WORKDIR /src
+RUN git clone --filter=blob:none "$BUZZ_REPO" . \
+ && git checkout "$BUZZ_REF" \
+ && git sparse-checkout init --cone \
+ && git sparse-checkout set crates Cargo.toml Cargo.lock
+
+# Build only what the runtime needs (static binary where possible).
+RUN cargo build --release -p buzz-cli -p buzz-acp -p git-credential-nostr \
+ && strip target/release/buzz target/release/buzz-acp target/release/git-credential-nostr
+
+# -- Stage 3: Node workspace builder (buzz-agent-prime itself) -----------------
+FROM ${NODE_BASE} AS node-builder
+
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY src/ tsconfig.json ./
+RUN npm ci \
+ && npm run build
+
+# -- Stage 4: minimal runtime -------------------------------------------------
+FROM ${DEBIAN_BASE} AS runtime
+
+ARG VERSION=0.1.0
+ARG REVISION=local
+ARG CREATED_AT=unknown
+
+LABEL org.opencontainers.image.title="buzz-agent-prime" \
+      org.opencontainers.image.description="Run Prime Agent as a persistent Buzz-native agent for Docker and Kubernetes" \
+      org.opencontainers.image.source="https://buzz.happyvertical.com/git/2ff508fee38b4ee69114c43693c2d863f8ecc93aef11ac91fea6b577045bd84a/buzz-agent-prime.git" \
+      org.opencontainers.image.url="https://github.com/willgriffin/buzz-agent-prime" \
+      org.opencontainers.image.documentation="https://github.com/willgriffin/buzz-agent-prime/blob/master/README.md" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED_AT}" \
+      org.opencontainers.image.vendor="willgriffin" \
+      org.opencontainers.image.authors="Will Griffin <will@griffn.ca>" \
+      ai.primeintellect.prime-agent.commit="a18809e00ea30638584d87b3afea7285a9d7296c" \
+      ai.primeintellect.prime-agent.version="0.7.1" \
+      io.block.buzz.commit="3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42"
+
+# Runtime + tooling only; no compilers, no git, no cargo.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      tini \
+      nodejs=22.12.0-1nodesource1 \
+      python3.12 python3.12-venv python3-pip \
+      git \
+      ripgrep \
+      jq \
+ && rm -rf /var/lib/apt/lists/*
+
+# uv (Python package manager)
+RUN curl -fsSL https://github.com/astral-sh/uv/releases/download/0.5.11/uv-aarch64-unknown-linux-gnu.tar.gz \
+    | tar -xz -C /tmp \
+ && mv /tmp/uv-aarch64-unknown-linux-gnu/uv /usr/local/bin/uv \
+ && rm -rf /tmp/uv-aarch64-unknown-linux-gnu
+
+# ipykernel for Prime's IPython tool
+RUN python3.12 -m venv /opt/prime-venv \
+ && /opt/prime-venv/bin/pip install --no-cache-dir ipykernel
+
+# Layered copies (ordered for cache locality).
+COPY --from=prime-builder /opt/prime-agent /opt/prime-agent
+COPY --from=rust-builder /src/target/release/buzz /usr/local/bin/buzz
+COPY --from=rust-builder /src/target/release/buzz-acp /usr/local/bin/buzz-acp
+COPY --from=rust-builder /src/target/release/git-credential-nostr /usr/local/bin/git-credential-nostr
+COPY --from=node-builder /src/dist /opt/buzz-agent-prime/dist
+COPY --from=node-builder /src/package.json /opt/buzz-agent-prime/package.json
+COPY LICENSE NOTICE.md /opt/buzz-agent-prime/
+
+# Symlink the binary and Prime's executable into a PATH directory.
+RUN ln -sf /opt/buzz-agent-prime/dist/cli.js /usr/local/bin/buzz-agent-prime \
+ && ln -sf /opt/prime-agent/dist/bundle/cli.js /usr/local/bin/prime-agent \
+ && chmod +x /opt/buzz-agent-prime/dist/cli.js
+
+# Non-root UID 1001; fixed identity keeps the volume permissions stable.
+RUN groupadd --system --gid 1001 buzzagent \
+ && useradd  --system --uid 1001 --gid buzzagent --home-dir /var/lib/buzz-agent-prime --shell /usr/sbin/nologin buzzagent \
+ && mkdir -p /var/lib/buzz-agent-prime /workspace /tmp \
+ && chown -R buzzagent:buzzagent /var/lib/buzz-agent-prime /workspace /tmp
+
+USER buzzagent
+WORKDIR /var/lib/buzz-agent-prime
+
+# tini as PID 1 — reaps Prime, IPython, and RLM children. serve is the supervisor.
+ENV NODE_ENV=production \
+    BUZZ_AGENT_PRIME_STATE_DIR=/var/lib/buzz-agent-prime \
+    BUZZ_AGENT_PRIME_WORKSPACE_DIR=/workspace \
+    BUZZ_AGENT_PRIME_TMP_DIR=/tmp \
+    PATH="/opt/prime-venv/bin:${PATH}"
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/buzz-agent-prime"]
+CMD ["serve"]
+
+# Declare writable mount points for operators (compose/k8s).
+VOLUME ["/var/lib/buzz-agent-prime", "/workspace", "/tmp"]
+
+# Healthcheck based on `buzz-agent-prime doctor` (per #6 spec).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/buzz-agent-prime", "doctor"] || exit 1

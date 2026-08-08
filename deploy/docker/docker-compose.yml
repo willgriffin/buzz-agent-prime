@@ -1,0 +1,63 @@
+# docker-compose.yml — buzz-agent-prime + external Buzz relay
+#
+# This is the operator-friendly compose file. It assumes you already have:
+# - A Buzz relay (not bundled — connect to your team's relay or a hosted instance)
+# - A Nostr keypair for the agent (set BUZZ_PRIVATE_KEY)
+# - Model provider credentials (set eg OPENAI_API_KEY)
+#
+# The agent identity must be registered as a relay member before it can read or
+# publish. Use `buzz-admin add-member` or the relay's admin UI.
+#
+# Run:
+#   BUZZ_PRIVATE_KEY=nsec1... OPENAI_API_KEY=sk-... docker compose up
+
+services:
+  agent:
+    image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+
+    environment:
+      # --- Required ---
+      - BUZZ_RELAY_URL=wss://buzz.happyvertical.com
+      - BUZZ_PRIVATE_KEY=${BUZZ_PRIVATE_KEY:?BUZZ_PRIVATE_KEY is required}
+
+      # --- Model provider (at least one) ---
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Add others as needed (see docs/deployment/providers.md)
+
+      # --- Runtime limits ---
+      - BUZZ_AGENT_PRIME_MAX_SESSIONS=4
+
+    tmpfs:
+      - /tmp:exec,size=256M
+      - /workspace:exec,size=512M
+
+    volumes:
+      - agent-state:/var/lib/buzz-agent-prime
+
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2"
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/buzz-agent-prime", "doctor"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    labels:
+      - "com.buzz.agent=prime"
+      - "com.buzz.agent.version=0.1.0"
+
+volumes:
+  agent-state:
+    name: buzz-agent-prime-state
