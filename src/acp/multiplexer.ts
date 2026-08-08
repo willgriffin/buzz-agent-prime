@@ -109,6 +109,10 @@ export class AcpMultiplexer {
    *  shutdown).  Used to distinguish `reason: "killed"` from natural exit
    *  or crash in the `childExited` notification (#20). */
   readonly #killedSessions = new Set<string>();
+  /** Session directories currently in use — guards duplicate named sessions
+   *  that share a `--session-dir` when `_meta.sessionTitle` is set but
+   *  `_meta.durableSessionKey` is not (#13 follow-up). */
+  readonly #liveSessionDirs = new Map<string, string>();
   readonly #pendingCreations = new Map<JsonRpcId, PendingCreation>();
   readonly #pendingPrompts = new Map<JsonRpcId, PendingPrompt>();
   readonly #pendingChildRequests = new Map<JsonRpcId, PendingChildRequest>();
@@ -169,6 +173,7 @@ export class AcpMultiplexer {
     this.#sessions.clear();
     this.#durableKeys.clear();
     this.#killedSessions.clear();
+    this.#liveSessionDirs.clear();
     this.#pendingCreations.clear();
     this.#pendingPrompts.clear();
     await this.#writer.drain();
@@ -283,6 +288,11 @@ export class AcpMultiplexer {
       typeof requestParams.cwd === "string" ? requestParams.cwd : this.#options.defaultCwd;
     const durableKey = readDurableSessionKey(requestParams);
 
+    // Derive session directory early so duplicate checks can use it.
+    const stateDir = process.env["BUZZ_AGENT_PRIME_STATE_DIR"] || "/var/lib/buzz-agent-prime";
+    const sessionTitle = readSessionTitle(requestParams);
+    const sessionDir = deriveSessionDir(cwd, sessionTitle, stateDir);
+
     if (this.sessionCount >= this.#options.maxSessions) {
       await this.#respondError(
         id,
@@ -303,21 +313,30 @@ export class AcpMultiplexer {
       );
       return;
     }
+    // Also guard against duplicate named sessions that share a
+    // `--session-dir` via `_meta.sessionTitle` without a durable key.
+    if (sessionDir !== undefined && this.#liveSessionDirs.has(sessionDir)) {
+      await this.#respondError(
+        id,
+        jsonRpcError(JSONRPC_ERROR.serverError, "Duplicate live named session", {
+          sessionDir,
+          reason: "duplicate_live_session_dir",
+        }),
+      );
+      return;
+    }
+
+    if (sessionDir) {
+      mkdirSync(sessionDir, { recursive: true });
+    }
 
     const outerSessionId = randomUUID();
     const abort = new AbortController();
     // Forward the client's session/new params verbatim, defaulting only the
     // members prime-agent requires even under an empty workload: cwd (we
     // always supply one) and mcpServers (buzz-acp always sends an array; a
-    // generic v2 client may omit it). cwd is overridden last so our resolved
-    // working directory always wins over a client-supplied value mismatch.
+    // generic v2 client may omit it).
     const sessionNewParams = { mcpServers: [], additionalDirectories: [], ...requestParams, cwd };
-    const stateDir = process.env["BUZZ_AGENT_PRIME_STATE_DIR"] || "/var/lib/buzz-agent-prime";
-    const sessionTitle = readSessionTitle(requestParams);
-    const sessionDir = deriveSessionDir(cwd, sessionTitle, stateDir);
-    if (sessionDir) {
-      mkdirSync(sessionDir, { recursive: true });
-    }
 
     const child = new ChildSession({
       primeBin: this.#options.primeBin,
@@ -333,11 +352,14 @@ export class AcpMultiplexer {
       initTimeoutMs: this.#options.childInitTimeoutMs,
       closeTimeoutMs: this.#options.childCloseTimeoutMs,
     });
-    // Register the durable key BEFORE the async handshake so two
-    // concurrent session/new requests cannot both pass the duplicate-key
-    // check (#22).
+    // Register the durable key and session dir BEFORE the async
+    // handshake so two concurrent session/new requests cannot both pass
+    // the duplicate-key check (#22, #13 follow-up).
     if (durableKey !== undefined) {
       this.#durableKeys.set(durableKey, outerSessionId);
+    }
+    if (sessionDir !== undefined) {
+      this.#liveSessionDirs.set(sessionDir, outerSessionId);
     }
 
     const creation: PendingCreation = { outerSessionId, child, durableKey, abort };
@@ -360,6 +382,7 @@ export class AcpMultiplexer {
     } catch (error) {
       this.#pendingCreations.delete(id);
       if (durableKey !== undefined) this.#durableKeys.delete(durableKey);
+      if (sessionDir !== undefined) this.#liveSessionDirs.delete(sessionDir);
       await child.terminate().catch(() => undefined);
       if (abort.signal.aborted) {
         await this.#respondError(
@@ -556,6 +579,13 @@ export class AcpMultiplexer {
     this.#dropSession(outerSessionId);
     // Surface the exit to the outer client as namespaced metadata so a
     // harness can distinguish an agent-chosen stop from a subprocess death.
+    // Clean up the per-session killed flag; use it for notification + log level.
+    const wasKilled = this.#killedSessions.delete(outerSessionId);
+    const reason: string = wasKilled
+      ? "killed"
+      : code !== 0 || signal !== null
+        ? "crashed"
+        : "exited";
     const update: Record<string, unknown> = {
       sessionUpdate: "session_info_update",
       _meta: {
@@ -564,18 +594,14 @@ export class AcpMultiplexer {
             sessionId: outerSessionId,
             code,
             signal,
-            reason: this.#killedSessions.has(outerSessionId)
-              ? "killed"
-              : code !== 0 || signal !== null
-                ? "crashed"
-                : "exited",
+            reason,
           },
         },
       },
     };
     this.#forwardUpdate(outerSessionId, update);
-    this.#logger.error(
-      `session ${outerSessionId}: prime-agent subprocess exited (code ${String(code)}, signal ${String(signal)})`,
+    this.#logger[reason === "killed" ? "info" : "error"](
+      `session ${outerSessionId}: child ${reason} (code ${String(code)}, signal ${String(signal)})`,
     );
   }
 
@@ -586,6 +612,14 @@ export class AcpMultiplexer {
     if (session.durableKey !== undefined) {
       const owner = this.#durableKeys.get(session.durableKey);
       if (owner === outerSessionId) this.#durableKeys.delete(session.durableKey);
+    }
+    // Release the session directory guard so a subsequent restart or new
+    // session can reclaim the directory.
+    for (const [dir, owner] of this.#liveSessionDirs) {
+      if (owner === outerSessionId) {
+        this.#liveSessionDirs.delete(dir);
+        break;
+      }
     }
     for (const [requestId, pending] of this.#pendingChildRequests) {
       if (pending.session.outerSessionId === outerSessionId) {

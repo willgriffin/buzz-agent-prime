@@ -67,8 +67,9 @@ export async function probePrimeAgent(options: PrimeProbeOptions): Promise<Prime
       "initialize",
       {
         protocolVersion: 2,
-        info: options.clientInfo,
         capabilities: {},
+        clientCapabilities: {},
+        info: options.clientInfo,
       },
       { timeoutMs },
     );

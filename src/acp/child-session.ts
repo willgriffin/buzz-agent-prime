@@ -10,6 +10,7 @@
  * session id.
  */
 
+import { existsSync, readdirSync } from "node:fs";
 import { ChildLink, ChildRpcError } from "./child-link.js";
 import type { Logger } from "./io.js";
 import {
@@ -60,6 +61,16 @@ export interface ChildSessionOptions {
  * method is used; it performs initialize + session/new and resolves with the
  * child session id and any `configOptions`/`_meta` the child returned.
  */
+/** Return true if a directory contains prior Prime session data (JSONL files). */
+function hasPriorSession(dir: string): boolean {
+  try {
+    const entries = readdirSync(dir);
+    return entries.some((e) => e.endsWith(".jsonl"));
+  } catch {
+    return false;
+  }
+}
+
 export class ChildSession {
   readonly outerSessionId: string;
   readonly cwd: string;
@@ -86,8 +97,13 @@ export class ChildSession {
     this.#sessionDir = options.sessionDir;
     this.#initTimeoutMs = options.initTimeoutMs ?? DEFAULT_CHILD_INIT_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_CHILD_CLOSE_TIMEOUT_MS;
+    // If a session directory is set and already has prior Prime state
+    // (a sessions/ subdirectory with JSONL files), pass --continue so
+    // Prime resumes the last session instead of creating a fresh one (#13).
     const acpArgs = this.#sessionDir
-      ? ["--mode", "acp", "--session-dir", this.#sessionDir]
+      ? existsSync(this.#sessionDir) && hasPriorSession(this.#sessionDir)
+        ? ["--mode", "acp", "--session-dir", this.#sessionDir, "--continue"]
+        : ["--mode", "acp", "--session-dir", this.#sessionDir]
       : ["--mode", "acp"];
     this.#link = new ChildLink({
       command: options.primeBin,

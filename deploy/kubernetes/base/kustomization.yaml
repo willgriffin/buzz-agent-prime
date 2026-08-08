@@ -5,10 +5,18 @@ namespace: buzz-agents
 
 commonLabels:
   app.kubernetes.io/name: buzz-agent-prime
-  app.kubernetes.io/version: "0.1.0"
 
 resources:
   - statefulset.yaml
+
+patches:
+  - target:
+      kind: StatefulSet
+      name: buzz-agent-prime
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/app.kubernetes.io~1version
+        value: "0.1.0"
   - service.yaml
   - network-policy.yaml
 
@@ -20,12 +28,11 @@ configMapGenerator:
       - BUZZ_ACP_RESPOND_TO=owner-only
       - BUZZ_ACP_HEARTBEAT_INTERVAL="0"
 
-secretGenerator:
-  - name: buzz-agent-prime-secrets
-    literals:
-      - BUZZ_PRIVATE_KEY=change-me-nsec-or-hex
-      - OPENAI_API_KEY=change-me
-    # Override these placeholder values in your private overlay.
-    # Production clusters: use ExternalSecret (Warden) instead of
-    # literal values — reference the ExternalSecret CR in your overlay
-    # and remove this secretGenerator.
+# Secrets are NOT in the base.  The base references an independently
+# provisioned Secret named `buzz-agent-prime-secrets` (created by your
+# overlay, ExternalSecret, or Warden).  The example overlay in
+# `deploy/kubernetes/overlays/example/` shows a sample Secret with
+# placeholder values.
+#
+# A real production overlay MUST remove the example generator and wire
+# an ExternalSecret CR (or equivalent) through the cluster's IaC.

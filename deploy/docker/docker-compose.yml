@@ -33,10 +33,10 @@ services:
 
     tmpfs:
       - /tmp:exec,size=256M
-      - /workspace:exec,size=512M
 
     volumes:
       - agent-state:/var/lib/buzz-agent-prime
+      - agent-workspace:/workspace
 
     deploy:
       resources:
@@ -61,3 +61,5 @@ services:
 volumes:
   agent-state:
     name: buzz-agent-prime-state
+  agent-workspace:
+    name: buzz-agent-prime-workspace

@@ -15,8 +15,8 @@ set -eu
 docker run --rm --init \
   --read-only \
   --tmpfs /tmp:exec,size=256M \
-  --tmpfs /workspace:exec,size=512M \
   --volume buzz-agent-prime-state:/var/lib/buzz-agent-prime \
+  --volume buzz-agent-prime-workspace:/workspace \
   --env BUZZ_PRIVATE_KEY \
   --env OPENAI_API_KEY \
   --env BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-wss://buzz.happyvertical.com}" \

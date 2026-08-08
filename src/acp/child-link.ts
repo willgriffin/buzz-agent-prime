@@ -7,7 +7,7 @@
  * descendants can be terminated and reaped as a group on close and shutdown.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { LineDecoder } from "./frame-codec.js";
 import {
   JSONRPC_ERROR,
@@ -274,6 +274,28 @@ export class ChildLink {
       }
     } catch {
       // ESRCH: already gone; nothing to reap.
+    }
+  }
+
+  /**
+   * Force-kill every process in the child's process group using an OS-level
+   * sweep (`pkill -g`).  Called after the escalated SIGTERM→SIGKILL
+   * sequence to catch any grandchild that may have detached from the group
+   * (#15).
+   */
+  forceKillGroup(): void {
+    if (this.#exit || this.child.pid === undefined) return;
+    try {
+      if (process.platform !== "win32") {
+        execSync(`pkill -9 -g ${this.child.pid} 2>/dev/null || true`, {
+          timeout: 2_000,
+          stdio: "ignore",
+        });
+      } else {
+        this.child.kill("SIGKILL");
+      }
+    } catch {
+      // Already gone; nothing to sweep.
     }
   }
 

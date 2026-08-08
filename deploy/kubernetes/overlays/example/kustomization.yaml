@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: buzz-agents
+
+resources:
+  - ../../base
+
+nameSuffix: -example
+
+secretGenerator:
+  - name: buzz-agent-prime-secrets
+    behavior: merge
+    literals:
+      - BUZZ_PRIVATE_KEY=change-me-nsec-or-hex
+      - OPENAI_API_KEY=change-me
+
+# Override relay URL for a specific environment.
+configMapGenerator:
+  - name: buzz-agent-prime-config
+    behavior: merge
+    literals:
+      - BUZZ_RELAY_URL=wss://buzz.happyvertical.com

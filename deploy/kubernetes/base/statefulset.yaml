@@ -51,8 +51,9 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /var/lib/buzz-agent-prime
-            - name: workspace
+            - name: state
               mountPath: /workspace
+              subPath: workspace
             - name: tmp
               mountPath: /tmp
 
@@ -77,12 +78,6 @@ spec:
             failureThreshold: 1
 
       volumes:
-        - name: state
-          persistentVolumeClaim:
-            claimName: buzz-agent-prime-state
-        - name: workspace
-          emptyDir:
-            sizeLimit: 512Mi
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
