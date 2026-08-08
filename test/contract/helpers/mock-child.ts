@@ -60,6 +60,7 @@ export function getMockChildPath(opts: MockChildOptions = {}): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "buzz-acp-mock-"));
   const scriptPath = path.join(tmpDir, "mock-child.mjs");
   fs.writeFileSync(scriptPath, script, "utf-8");
+  fs.chmodSync(scriptPath, 0o755);
   cache.set(key, scriptPath);
   return scriptPath;
 }
@@ -337,16 +338,16 @@ if (CRASH_ON_START) {
  * the mock child instead of the real `prime-agent` binary.
  *
  * The multiplexer (issue #3) is expected to honour:
- * - `BUZZ_AGENT_PRIME_ACP_CHILD_BIN` — override the child binary path
- * - `BUZZ_AGENT_PRIME_ACP_CHILD_ARGS` — override child args (comma-separated)
+ * - `BUZZ_AGENT_PRIME_PRIME_BIN` — override the child binary path
+ * - `BUZZ_AGENT_PRIME_PRIME_ARGS` — override child args (comma-separated)
  *
  * If the multiplexer uses a different env var, the contract should be
  * proposed as a change via the QA worker's reply to the lead.
  */
 export function mockChildEnv(mockPath: string): Record<string, string> {
   return {
-    BUZZ_AGENT_PRIME_ACP_CHILD_BIN: mockPath,
-    BUZZ_AGENT_PRIME_ACP_CHILD_ARGS: "",
+    BUZZ_AGENT_PRIME_PRIME_BIN: mockPath,
+    BUZZ_AGENT_PRIME_PRIME_ARGS: "",
     // Use a small state dir for test isolation
     BUZZ_AGENT_PRIME_STATE_DIR: path.join(os.tmpdir(), "buzz-acp-test-" + process.pid),
     BUZZ_AGENT_PRIME_MAX_SESSIONS: "4",

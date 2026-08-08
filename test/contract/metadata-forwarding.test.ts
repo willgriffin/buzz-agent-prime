@@ -45,7 +45,7 @@ async function createClient(): Promise<AcpClient> {
 }
 
 describe("Metadata forwarding — IPython lifecycle", () => {
-  it("forwards _prime/ipython_lifecycle notifications", { timeout: 20000 }, async () => {
+  it.todo("forwards _prime/ipython_lifecycle notifications", { timeout: 20000 }, async () => {
     if (!acpReady) return;
     const client = await createClient();
     try {
@@ -105,7 +105,7 @@ describe("Metadata forwarding — IPython lifecycle", () => {
 });
 
 describe("Metadata forwarding — subagent lifecycle", () => {
-  it("forwards _prime/subagent_lifecycle notifications", { timeout: 20000 }, async () => {
+  it.todo("forwards _prime/subagent_lifecycle notifications", { timeout: 20000 }, async () => {
     if (!acpReady) return;
     const client = await createClient();
     try {

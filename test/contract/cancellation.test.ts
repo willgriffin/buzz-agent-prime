@@ -14,7 +14,7 @@ import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { AcpClient } from "./helpers/acp-client.js";
 import { isAcpReady, WORKTREE_DIR } from "./helpers/test-env.js";
 import { getMockChildPath, clearMockChildCache, mockChildEnv } from "./helpers/mock-child.js";
-import { isResult } from "./helpers/types.js";
+import { isResult } from "./helpers/ndjson.js";
 
 let acpReady = false;
 

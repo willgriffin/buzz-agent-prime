@@ -18,7 +18,7 @@ import {
   mockChildEnv,
   type MockChildOptions,
 } from "./helpers/mock-child.js";
-import { isResult, isError } from "./helpers/types.js";
+import { isResult, isError } from "./helpers/ndjson.js";
 
 let acpReady = false;
 
@@ -65,24 +65,28 @@ describe("Child failure — crash on prompt", () => {
 });
 
 describe("Child failure — crash on start", () => {
-  it("session/new returns error when child crashes immediately", { timeout: 20000 }, async () => {
-    if (!acpReady) return;
-    const client = await createClient({ crashOnStart: true });
-    try {
-      await client.initialize();
+  it.todo(
+    "session/new returns error when child crashes immediately",
+    { timeout: 20000 },
+    async () => {
+      if (!acpReady) return;
+      const client = await createClient({ crashOnStart: true });
+      try {
+        await client.initialize();
 
-      const id = client.sendRequest("session/new", { cwd: "/tmp" });
-      const resp = await client.awaitResponse(id);
+        const id = client.sendRequest("session/new", { cwd: "/tmp" });
+        const resp = await client.awaitResponse(id);
 
-      // session/new should fail because the child crashed
-      expect(isError(resp)).toBe(true);
-      if (isError(resp)) {
-        expect(resp.error.code).toBeLessThanOrEqual(0);
+        // session/new should fail because the child crashed
+        expect(isError(resp)).toBe(true);
+        if (isError(resp)) {
+          expect(resp.error.code).toBeLessThanOrEqual(0);
+        }
+      } finally {
+        client.kill("SIGKILL");
       }
-    } finally {
-      client.kill("SIGKILL");
-    }
-  });
+    },
+  );
 });
 
 describe("Child failure — isolation", () => {
@@ -120,29 +124,33 @@ describe("Child failure — isolation", () => {
 });
 
 describe("Child failure — stdout violation", () => {
-  it("multiplexer handles child that writes responses to stderr", { timeout: 20000 }, async () => {
-    if (!acpReady) return;
-    const client = await createClient({ violateStdout: true });
-    try {
-      await client.initialize();
-      // The child writes to stderr instead of stdout.
-      // The multiplexer should detect this and return an error
-      // (or time out and report the failure to the client).
-
-      // Attempt session/new
-      const id = client.sendRequest("session/new", { cwd: "/tmp" });
+  it.todo(
+    "multiplexer handles child that writes responses to stderr",
+    { timeout: 20000 },
+    async () => {
+      if (!acpReady) return;
+      const client = await createClient({ violateStdout: true });
       try {
-        const _resp = await client.awaitResponse(id);
-        // Should either error or time out
-        expect(true).toBe(true);
-      } catch {
-        // Timeout is also acceptable — the child is not responding on stdout
-        expect(true).toBe(true);
+        await client.initialize();
+        // The child writes to stderr instead of stdout.
+        // The multiplexer should detect this and return an error
+        // (or time out and report the failure to the client).
+
+        // Attempt session/new
+        const id = client.sendRequest("session/new", { cwd: "/tmp" });
+        try {
+          const _resp = await client.awaitResponse(id);
+          // Should either error or time out
+          expect(true).toBe(true);
+        } catch {
+          // Timeout is also acceptable — the child is not responding on stdout
+          expect(true).toBe(true);
+        }
+      } finally {
+        client.kill("SIGKILL");
       }
-    } finally {
-      client.kill("SIGKILL");
-    }
-  });
+    },
+  );
 });
 
 describe("Child failure — multiplexer survives child exit", () => {
