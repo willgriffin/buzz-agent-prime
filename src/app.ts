@@ -1,3 +1,4 @@
+import { runAcpCommand } from "./acp/index.js";
 import { version } from "./version.js";
 
 export const COMMANDS = ["acp", "serve", "doctor", "version"] as const;
@@ -9,7 +10,7 @@ Usage:
   buzz-agent-prime <command> [options]
 
 Commands:
-  acp       Speak ACP v2 NDJSON over stdin/stdout (session multiplexer; issue #3)
+  acp       Speak ACP v2 NDJSON over stdin/stdout (session multiplexer)
   serve     Launch buzz-acp and supervise Prime sessions (issue #4)
   doctor    Diagnose the runtime environment (issue #4)
   version   Print the installed version
@@ -18,8 +19,7 @@ Commands:
 
 /**
  * Dispatch a CLI invocation. Returns the process exit code.
- * Command implementations beyond `version` land in issues #3/#4; the names
- * are reserved here so the public contract is stable from day one.
+ * `acp` and `version` are implemented; `serve` and `doctor` land in issue #4.
  */
 export async function run(argv: readonly string[]): Promise<number> {
   const [command] = argv;
@@ -34,10 +34,7 @@ export async function run(argv: readonly string[]): Promise<number> {
       process.stdout.write(`${version()}\n`);
       return 0;
     case "acp":
-      process.stderr.write(
-        "buzz-agent-prime acp: not implemented yet (core multiplexer, issue #3)\n",
-      );
-      return 1;
+      return runAcpCommand();
     case "serve":
       process.stderr.write(
         "buzz-agent-prime serve: not implemented yet (runtime supervision, issue #4)\n",

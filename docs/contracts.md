@@ -35,6 +35,7 @@ fail without corrupting the stdout stream.
 | Variable                         | Default                     | Owner | Meaning                                                                                      |
 | -------------------------------- | --------------------------- | ----- | -------------------------------------------------------------------------------------------- |
 | `BUZZ_AGENT_PRIME_MAX_SESSIONS`  | `4`                         | #3    | Maximum concurrent outer ACP sessions.                                                       |
+| `BUZZ_AGENT_PRIME_PRIME_BIN`     | `prime-agent`               | #3    | Prime Agent executable path (not on the public npm registry; override per image).            |
 | `BUZZ_AGENT_PRIME_STATE_DIR`     | `/var/lib/buzz-agent-prime` | #4    | Persistent Prime configuration, sessions, kernel state, artifacts, and repository checkouts. |
 | `BUZZ_AGENT_PRIME_WORKSPACE_DIR` | `<state>/workspace`         | #4    | Default working directory for spawned sessions.                                              |
 | `BUZZ_AGENT_PRIME_TMP_DIR`       | `<state>/tmp`               | #4    | Writable scratch space inside the container.                                                 |
@@ -61,3 +62,42 @@ This avoids a config schema lock-in before `serve`/`doctor` mature.
 
 Contract changes require a minor-version bump and a documented migration path.
 See `docs/compatibility.md` for upstream pins and the compatibility matrix.
+
+## ACP multiplexer protocol contract (issue #3)
+
+### `initialize`
+
+The multiplexer probes the pinned Prime executable and returns a merged
+`initialize` response that preserves Prime's capabilities and namespaced
+`_meta` (under `ai.primeintellect.prime-agent`) and adds its own namespace
+under `ai.buzz.buzz-agent-prime` with:
+
+- `multiplexer: true`
+- `upstream: { name: "prime-agent", version: <probed> }`
+
+### `session/new`
+
+- Capacity bound: `session/new` beyond `BUZZ_AGENT_PRIME_MAX_SESSIONS`
+  returns JSON-RPC server error `-32000`, message `"Maximum concurrent
+sessions reached"`, data `{ maxSessions, reason: "capacity" }`.
+- Durable keys: `session/new` params `_meta.durableSessionKey` (string) are
+  honoured. A duplicate **live** key is rejected with JSON-RPC `invalidParams`
+  (`-32602`, data `{ durableSessionKey, reason: "duplicate_live_key" }`). The
+  key is accepted again after the holding session closes or the child exits.
+- Session isolation: each outer `session/new` launches an isolated
+  `prime-agent --mode acp` subprocess in the requested `cwd`.
+- `additionalDirectories` and `mcpServers` default to `[]` when omitted.
+
+### Session errors and child exits
+
+- A child crash or non-zero exit is forwarded as a
+  `session_info_update` notification with `_meta` payload
+  `{ sessionId, code, signal }` under the
+  `ai.buzz.buzz-agent-prime` namespace key `childExited`.
+
+### stdout discipline
+
+Only ACP NDJSON frames reach stdout. All diagnostics, logs, and forwarded
+child stderr (prefixed `[prime-agent:<sessionId>]`) go to stderr. Malformed
+inbound frames emit a valid JSON-RPC error frame (id null) and continue.
+Oversized frames are rejected and the stream resumes at the next newline.
