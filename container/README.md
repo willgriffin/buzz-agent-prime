@@ -33,14 +33,14 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## What's inside
 
-| Component | Version / Pin |
-| --- | --- |
-| prime-agent | v0.7.1 / `a18809e0` (tarball verified by SHA256) |
-| buzz, buzz-acp, git-credential-nostr | `3a96acea` (Rust build from pinned commit) |
-| buzz-agent-prime | this repo, latest |
-| Node.js | 22.12.0 |
-| Python | 3.12 (with ipykernel) |
-| uv | 0.5.11 |
+| Component                            | Version / Pin                                    |
+| ------------------------------------ | ------------------------------------------------ |
+| prime-agent                          | v0.7.1 / `a18809e0` (tarball verified by SHA256) |
+| buzz, buzz-acp, git-credential-nostr | `3a96acea` (Rust build from pinned commit)       |
+| buzz-agent-prime                     | this repo, latest                                |
+| Node.js                              | 22.12.0                                          |
+| Python                               | 3.12 (with ipykernel)                            |
+| uv                                   | 0.5.11                                           |
 
 ## Smoke test
 
@@ -77,4 +77,3 @@ docker run --rm --read-only \
 
 Every pinned upstream is verified by SHA256 at build time. The resulting image
 carries OCI labels with exact version and commit hashes.
-
