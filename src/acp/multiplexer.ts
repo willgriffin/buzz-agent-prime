@@ -10,8 +10,9 @@
  * another.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ChildRpcError } from "./child-link.js";
+import { mkdirSync } from "node:fs";
 import { ChildSession } from "./child-session.js";
 import type { FrameWriter, Logger } from "./io.js";
 import { probePrimeAgent, type PrimeProbeResult } from "./prime-probe.js";
@@ -77,12 +78,37 @@ interface PendingChildRequest {
   childRequestId: JsonRpcId;
 }
 
+/** Derive deterministic session directory from canonical cwd + session title. */
+function deriveSessionDir(
+  cwd: string,
+  sessionTitle: string | undefined,
+  stateDir: string,
+): string | undefined {
+  const title = sessionTitle?.trim();
+  if (!title) return undefined;
+  const hash = createHash("sha256");
+  hash.update(cwd);
+  hash.update("\0");
+  hash.update(title);
+  return `${stateDir}/sessions/${hash.digest("hex").slice(0, 32)}`;
+}
+
+/** Read `_meta.sessionTitle` from session/new params. */
+function readSessionTitle(params: Record<string, unknown>): string | undefined {
+  const meta = params["_meta"] as Record<string, unknown> | undefined;
+  return typeof meta?.["sessionTitle"] === "string" ? (meta["sessionTitle"] as string) : undefined;
+}
+
 export class AcpMultiplexer {
   readonly #options: MultiplexerOptions;
   readonly #writer: FrameWriter;
   readonly #logger: Logger;
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #durableKeys = new Map<string, string>();
+  /** Sessions intentionally terminated by the multiplexer (close, cancel,
+   *  shutdown).  Used to distinguish `reason: "killed"` from natural exit
+   *  or crash in the `childExited` notification (#20). */
+  readonly #killedSessions = new Set<string>();
   readonly #pendingCreations = new Map<JsonRpcId, PendingCreation>();
   readonly #pendingPrompts = new Map<JsonRpcId, PendingPrompt>();
   readonly #pendingChildRequests = new Map<JsonRpcId, PendingChildRequest>();
@@ -124,6 +150,7 @@ export class AcpMultiplexer {
     this.#shuttingDown = true;
     const cleanups: Promise<void>[] = [];
     for (const record of this.#sessions.values()) {
+      this.#killedSessions.add(record.outerSessionId);
       cleanups.push(record.child.terminate().catch(() => undefined));
     }
     for (const creation of this.#pendingCreations.values()) {
@@ -141,6 +168,7 @@ export class AcpMultiplexer {
     await Promise.allSettled(cleanups);
     this.#sessions.clear();
     this.#durableKeys.clear();
+    this.#killedSessions.clear();
     this.#pendingCreations.clear();
     this.#pendingPrompts.clear();
     await this.#writer.drain();
@@ -284,12 +312,20 @@ export class AcpMultiplexer {
     // generic v2 client may omit it). cwd is overridden last so our resolved
     // working directory always wins over a client-supplied value mismatch.
     const sessionNewParams = { mcpServers: [], additionalDirectories: [], ...requestParams, cwd };
+    const stateDir = process.env["BUZZ_AGENT_PRIME_STATE_DIR"] || "/var/lib/buzz-agent-prime";
+    const sessionTitle = readSessionTitle(requestParams);
+    const sessionDir = deriveSessionDir(cwd, sessionTitle, stateDir);
+    if (sessionDir) {
+      mkdirSync(sessionDir, { recursive: true });
+    }
+
     const child = new ChildSession({
       primeBin: this.#options.primeBin,
       clientInfo: this.#options.clientInfo,
       outerSessionId,
       cwd,
       sessionNewParams,
+      sessionDir,
       onUpdate: (update) => this.#forwardUpdate(outerSessionId, update),
       onRequest: (request) => void this.#forwardChildRequest(outerSessionId, request),
       onExit: (code, signal) => this.#handleChildExit(outerSessionId, code, signal),
@@ -297,6 +333,13 @@ export class AcpMultiplexer {
       initTimeoutMs: this.#options.childInitTimeoutMs,
       closeTimeoutMs: this.#options.childCloseTimeoutMs,
     });
+    // Register the durable key BEFORE the async handshake so two
+    // concurrent session/new requests cannot both pass the duplicate-key
+    // check (#22).
+    if (durableKey !== undefined) {
+      this.#durableKeys.set(durableKey, outerSessionId);
+    }
+
     const creation: PendingCreation = { outerSessionId, child, durableKey, abort };
     this.#pendingCreations.set(id, creation);
 
@@ -310,13 +353,13 @@ export class AcpMultiplexer {
         durableKey,
       };
       this.#sessions.set(outerSessionId, record);
-      if (durableKey !== undefined) this.#durableKeys.set(durableKey, outerSessionId);
       this.#logger.info(
         `session ${outerSessionId} created (child ${result.sessionId}, cwd ${cwd}, ${this.#sessions.size}/${this.#options.maxSessions} live)`,
       );
       await this.#respond(id, this.#newSessionResponse(outerSessionId, result));
     } catch (error) {
       this.#pendingCreations.delete(id);
+      if (durableKey !== undefined) this.#durableKeys.delete(durableKey);
       await child.terminate().catch(() => undefined);
       if (abort.signal.aborted) {
         await this.#respondError(
@@ -390,6 +433,7 @@ export class AcpMultiplexer {
         this.#pendingPrompts.delete(promptId);
       }
     }
+    this.#killedSessions.add(session.outerSessionId);
     await session.child.close();
     this.#dropSession(session.outerSessionId);
     this.#logger.info(`session ${session.outerSessionId} closed`);
@@ -520,6 +564,11 @@ export class AcpMultiplexer {
             sessionId: outerSessionId,
             code,
             signal,
+            reason: this.#killedSessions.has(outerSessionId)
+              ? "killed"
+              : code !== 0 || signal !== null
+                ? "crashed"
+                : "exited",
           },
         },
       },

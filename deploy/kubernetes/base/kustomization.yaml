@@ -22,8 +22,10 @@ configMapGenerator:
 
 secretGenerator:
   - name: buzz-agent-prime-secrets
-    literals: []
-    # Replace with a real secret provider (Warden/ExternalSecret).
-    # Literals here are placeholders — never commit real values.
-    #   BUZZ_PRIVATE_KEY=nsec1...
-    #   OPENAI_API_KEY=sk-...
+    literals:
+      - BUZZ_PRIVATE_KEY=change-me-nsec-or-hex
+      - OPENAI_API_KEY=change-me
+    # Override these placeholder values in your private overlay.
+    # Production clusters: use ExternalSecret (Warden) instead of
+    # literal values — reference the ExternalSecret CR in your overlay
+    # and remove this secretGenerator.

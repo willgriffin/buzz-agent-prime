@@ -39,6 +39,10 @@ export interface ChildSessionOptions {
   cwd: string;
   /** The outer `session/new` params, forwarded verbatim to the child. */
   sessionNewParams: Record<string, unknown>;
+  /** Optional `--session-dir` passed to the child prime-agent process.
+   *  A named (durable) session stores all state under this path so the
+   *  same Prime session can be resumed after a container restart (#13). */
+  sessionDir?: string | undefined;
   /** Called with each `session/update` notification payload from the child. */
   onUpdate: (update: Record<string, unknown>) => void;
   /** Called when the child process exits (after cleanup bookkeeping). */
@@ -65,6 +69,7 @@ export class ChildSession {
   readonly #logger: Logger;
   readonly #clientInfo: { name: string; version: string };
   readonly #sessionNewParams: Record<string, unknown>;
+  readonly #sessionDir: string | undefined;
   readonly #initTimeoutMs: number;
   readonly #closeTimeoutMs: number;
   #childSessionId: string | undefined;
@@ -78,11 +83,15 @@ export class ChildSession {
     this.#logger = options.logger;
     this.#clientInfo = options.clientInfo;
     this.#sessionNewParams = options.sessionNewParams;
+    this.#sessionDir = options.sessionDir;
     this.#initTimeoutMs = options.initTimeoutMs ?? DEFAULT_CHILD_INIT_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_CHILD_CLOSE_TIMEOUT_MS;
+    const acpArgs = this.#sessionDir
+      ? ["--mode", "acp", "--session-dir", this.#sessionDir]
+      : ["--mode", "acp"];
     this.#link = new ChildLink({
       command: options.primeBin,
-      args: ["--mode", "acp"],
+      args: acpArgs,
       cwd: options.cwd,
       onNotification: (notification) => this.#handleNotification(notification),
       onRequest: options.onRequest,
