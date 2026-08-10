@@ -85,8 +85,8 @@ describe("Cancellation — session survives cancellation", () => {
       await new Promise((r) => setTimeout(r, 200));
       client.cancel(session.sessionId);
       await new Promise((r) => setTimeout(r, 600));
-      client.collectAll();
       expect(isResult((await promptPromise).response)).toBe(true);
+      client.collectAll();
 
       // Should be able to send a new prompt
       const { response } = await client.prompt(session.sessionId, "after cancel");
