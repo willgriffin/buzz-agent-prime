@@ -15,8 +15,12 @@ function renderKustomization(path: string): string {
   return execFileSync("kubectl", ["kustomize", path], { encoding: "utf8" });
 }
 
-function renderedStatefulSet(manifest: string): string {
-  return manifest.split("\n---\n").find((document) => /^kind: StatefulSet$/m.test(document)) ?? "";
+function renderedResource(manifest: string, kind: string): string {
+  return (
+    manifest
+      .split("\n---\n")
+      .find((document) => new RegExp(`^kind: ${kind}$`, "m").test(document)) ?? ""
+  );
 }
 
 function namesIn(block: string, indent: number): Set<string> {
@@ -27,9 +31,15 @@ function namesIn(block: string, indent: number): Set<string> {
 
 function assertRenderedStatefulSet(path: string, expectedName: string): void {
   const manifest = renderKustomization(path);
-  const statefulSet = renderedStatefulSet(manifest);
-  expect(manifest).toMatch(/^kind: Service$/m);
-  expect(manifest).toMatch(/^kind: NetworkPolicy$/m);
+  const statefulSet = renderedResource(manifest, "StatefulSet");
+  const service = renderedResource(manifest, "Service");
+  const networkPolicy = renderedResource(manifest, "NetworkPolicy");
+  const namespace = renderedResource(manifest, "Namespace");
+  expect(service).not.toBe("");
+  expect(service).toContain("app.kubernetes.io/name: buzz-agent-prime");
+  expect(networkPolicy).not.toBe("");
+  expect(networkPolicy).toContain("app.kubernetes.io/name: buzz-agent-prime");
+  expect(namespace).toContain("name: buzz-agents");
   expect(manifest).not.toMatch(
     /^kind: (ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding)$/m,
   );
@@ -46,7 +56,7 @@ function assertRenderedStatefulSet(path: string, expectedName: string): void {
   expect(statefulSet).toContain("resources:");
 
   const mounts = namesIn(
-    statefulSet.match(/        volumeMounts:\n([\s\S]*?)\n        livenessProbe:/)?.[1] ?? "",
+    statefulSet.match(/        volumeMounts:\n([\s\S]*?)\n      securityContext:/)?.[1] ?? "",
     10,
   );
   const volumes = namesIn(
@@ -59,8 +69,8 @@ function assertRenderedStatefulSet(path: string, expectedName: string): void {
   );
 
   expect([...mounts].filter((name) => !volumes.has(name) && !claimTemplates.has(name))).toEqual([]);
-  expect(claimTemplates).toEqual(new Set(["state"]));
-  expect(statefulSet).not.toContain("buzz-agent-prime-state");
+  expect(mounts).toEqual(new Set(["buzz-agent-prime-state", "tmp"]));
+  expect(claimTemplates).toEqual(new Set(["buzz-agent-prime-state"]));
 }
 
 describe("Kubernetes kustomizations", () => {
@@ -68,12 +78,13 @@ describe("Kubernetes kustomizations", () => {
     const baseKustomization = readFileSync(resolve(basePath, "kustomization.yaml"), "utf8");
 
     expect(baseKustomization).toMatch(
-      /resources:\n  - statefulset.yaml\n  - service.yaml\n  - network-policy.yaml/,
+      /resources:\n  - namespace.yaml\n  - statefulset.yaml\n  - service.yaml\n  - network-policy.yaml/,
     );
     expect(baseKustomization).not.toMatch(/patches:[\s\S]*- service.yaml/);
     expect(baseKustomization).not.toMatch(/patches:[\s\S]*- network-policy.yaml/);
     expect(existsSync(resolve(basePath, "service.yaml"))).toBe(true);
     expect(existsSync(resolve(basePath, "network-policy.yaml"))).toBe(true);
+    expect(existsSync(resolve(basePath, "namespace.yaml"))).toBe(true);
     expect(readFileSync(resolve(examplePath, "kustomization.yaml"), "utf8")).not.toContain(
       "secretGenerator",
     );

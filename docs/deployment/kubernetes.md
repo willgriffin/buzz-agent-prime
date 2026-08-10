@@ -1,9 +1,9 @@
 # Kubernetes Deployment
 
 `buzz-agent-prime` runs as a one-replica StatefulSet in the `buzz-agents`
-namespace. Its `state` volume claim template provides the persistent state
-needed to recover named Prime sessions after a pod replacement. Do not scale
-this deployment above one replica in v0.1.
+namespace. Its `buzz-agent-prime-state` volume claim template provides the
+persistent state needed to recover named Prime sessions after a pod
+replacement. Do not scale this deployment above one replica in v0.1.
 
 ## Prerequisites
 
@@ -37,8 +37,11 @@ secret generator.
 
 Create the exact stable Secret name before applying either kustomization. Do
 not commit the command with real values or create an empty Secret in the base.
+The base owns the namespace; apply it first so fresh clusters can create the
+Secret idempotently:
 
 ```bash
+kubectl apply -f deploy/kubernetes/base/namespace.yaml
 kubectl -n buzz-agents create secret generic buzz-agent-prime-secrets \
   --from-literal=BUZZ_PRIVATE_KEY='nsec1replace-with-your-key' \
   --from-literal=ANTHROPIC_API_KEY='replace-with-your-provider-key'
@@ -74,11 +77,11 @@ spec:
         key: buzz-agent-prime/anthropic-api-key
 ```
 
-Wait for the resulting Secret before applying the workload:
+Before applying the workload, verify that the Secret controller has created
+the target Secret:
 
 ```bash
-kubectl -n buzz-agents wait --for=create secret/buzz-agent-prime-secrets \
-  --timeout=120s
+kubectl -n buzz-agents get secret buzz-agent-prime-secrets
 ```
 
 ## Apply and verify
@@ -102,26 +105,29 @@ kubectl -n buzz-agents get statefulset,pod,pvc
 kubectl -n buzz-agents describe pod buzz-agent-prime-example-0
 ```
 
-The rendered template mounts `state` directly, so the ordinal pod receives the
-StatefulSet-generated PVC `state-buzz-agent-prime-example-0` (the base uses
-`state-buzz-agent-prime-0`). There is no static PVC named
-`buzz-agent-prime-state`.
+The rendered template mounts `buzz-agent-prime-state` directly, so the ordinal
+pod receives the StatefulSet-generated PVC
+`buzz-agent-prime-state-buzz-agent-prime-example-0` (the base uses
+`buzz-agent-prime-state-buzz-agent-prime-0`). This preserves the established
+PVC identity on an ordinary pod-template rollout; no StatefulSet recreation or
+data migration is required.
 
 ## Pod-replacement/PVC identity evidence
 
-The manifest test checks the deterministic relationship between the `state`
-mount, the `state` claim template, and the resulting ordinal PVC name. A live
-cluster recovery test remains gated by issue #11. When that environment is
-available, collect this evidence after creating a named Prime session:
+The manifest test checks the deterministic relationship between the
+`buzz-agent-prime-state` mount, the matching claim template, and the resulting
+ordinal PVC name. A live cluster recovery test remains gated by issue #11.
+When that environment is available, collect this evidence after creating a
+named Prime session:
 
 ```bash
 kubectl -n buzz-agents get pod buzz-agent-prime-example-0 \
-  -o jsonpath='{.spec.volumes[?(@.name=="state")].persistentVolumeClaim.claimName}{"\\n"}'
-kubectl -n buzz-agents get pvc state-buzz-agent-prime-example-0 \
+  -o jsonpath='{.spec.volumes[?(@.name=="buzz-agent-prime-state")].persistentVolumeClaim.claimName}{"\\n"}'
+kubectl -n buzz-agents get pvc buzz-agent-prime-state-buzz-agent-prime-example-0 \
   -o jsonpath='{.metadata.uid}{"\\n"}'
 kubectl -n buzz-agents delete pod buzz-agent-prime-example-0
 kubectl -n buzz-agents rollout status statefulset/buzz-agent-prime-example
-kubectl -n buzz-agents get pvc state-buzz-agent-prime-example-0 \
+kubectl -n buzz-agents get pvc buzz-agent-prime-state-buzz-agent-prime-example-0 \
   -o jsonpath='{.metadata.uid}{"\\n"}'
 kubectl -n buzz-agents exec statefulset/buzz-agent-prime-example -- \
   buzz-agent-prime doctor

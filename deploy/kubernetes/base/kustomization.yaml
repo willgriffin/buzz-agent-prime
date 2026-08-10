@@ -8,6 +8,7 @@ labels:
       app.kubernetes.io/name: buzz-agent-prime
 
 resources:
+  - namespace.yaml
   - statefulset.yaml
   - service.yaml
   - network-policy.yaml
