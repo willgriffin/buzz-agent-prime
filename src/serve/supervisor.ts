@@ -55,7 +55,11 @@ export class Supervisor extends EventEmitter {
       env: this.options.env,
       cwd: this.options.cwd,
       stdio: "inherit",
-      detached: true,
+      // POSIX process groups let shutdown reach every descendant. Windows has
+      // no compatible negative-PID signalling, so it uses direct-child
+      // signalling below instead.
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
     this.child = child;
 
@@ -87,41 +91,118 @@ export class Supervisor extends EventEmitter {
     this.emit("shutdown", signal);
 
     const child = this.child;
-    if (!child || child.killed) return;
+    // A failed spawn has no OS process to signal or reap.
+    if (!child || child.pid === undefined || this.hasExited(child)) return;
 
     await this.terminate(child, signal);
   }
 
-  private terminate(child: ChildProcess, signal: NodeJS.Signals): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let settled = false;
+  private async terminate(child: ChildProcess, signal: NodeJS.Signals): Promise<void> {
+    const groupSignalled = this.signalProcessTree(child, signal);
+    if (groupSignalled) {
+      // A group can outlive its leader when a descendant ignores SIGTERM. Keep
+      // watching the group through the grace period rather than treating the
+      // direct child's exit as a complete shutdown.
+      if (await this.waitForProcessGroupExit(child.pid!, this.shutdownTimeoutMs)) {
+        await this.waitForExit(child);
+        return;
+      }
 
-      const done = () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve();
-        }
-      };
+      this.signalProcessTree(child, "SIGKILL");
+      await this.waitForExit(child);
+      return;
+    }
 
-      const timer = setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
-        done();
-      }, this.shutdownTimeoutMs);
+    if (await this.waitForExit(child, this.shutdownTimeoutMs)) return;
 
-      child.once("exit", () => done());
+    // The initial signal may have been delivered successfully without causing
+    // an exit. Escalate, then wait until Node has observed the child exit
+    // before declaring shutdown complete.
+    this.signalProcessTree(child, "SIGKILL");
+    await this.waitForExit(child);
+  }
 
-      // Signal the entire process group so descendants receive the signal.
-      if (child.pid !== undefined) {
-        try {
-          process.kill(-child.pid, signal);
-        } catch {
-          // Process group may not exist yet; fall back to direct kill.
-          child.kill(signal);
-        }
+  /** Whether Node has observed the child process exit and reaped it. */
+  private hasExited(child: ChildProcess): boolean {
+    return child.exitCode !== null || child.signalCode !== null;
+  }
+
+  /**
+   * Signal the child's POSIX process group, with a direct-child fallback.
+   *
+   * Never use a negative PID on Windows or when it could target this process's
+   * own group. The latter cannot occur for a detached child, but the guard
+   * keeps this safety property explicit even if spawning changes later.
+   */
+  private signalProcessTree(child: ChildProcess, signal: NodeJS.Signals): boolean {
+    const pid = child.pid;
+    if (pid === undefined || pid <= 0 || pid === process.pid) return false;
+
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-pid, signal);
+        return true;
+      } catch {
+        // The group may have gone away between liveness checking and signal
+        // delivery. Its direct child remains safe to signal as a fallback.
+      }
+    }
+
+    try {
+      child.kill(signal);
+    } catch {
+      // The child exited between liveness checking and signal delivery.
+    }
+    return false;
+  }
+
+  /** Wait until a POSIX process group no longer exists, up to its grace period. */
+  private async waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.isProcessGroupAlive(pid)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(remaining, 25)));
+    }
+    return true;
+  }
+
+  /** Check a detached POSIX process group without ever probing our own group. */
+  private isProcessGroupAlive(pid: number): boolean {
+    if (process.platform === "win32" || pid <= 0 || pid === process.pid) return false;
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error: unknown) {
+      // ESRCH proves the group is gone. Other errors (for example EPERM) mean
+      // it may still be running, so retain the safer escalation path.
+      return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+  }
+
+  /** Wait for an observed exit, optionally returning false when grace expires. */
+  private async waitForExit(child: ChildProcess, timeoutMs?: number): Promise<boolean> {
+    if (this.hasExited(child)) return true;
+
+    let onExit: () => void;
+    const exited = new Promise<boolean>((resolve) => {
+      onExit = () => resolve(true);
+      child.once("exit", onExit);
+      if (this.hasExited(child)) {
+        child.removeListener("exit", onExit);
+        resolve(true);
       }
     });
+
+    if (timeoutMs === undefined) return exited;
+
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    const result = await Promise.race([exited, timedOut]);
+    if (timer) clearTimeout(timer);
+    if (!result) child.removeListener("exit", onExit!);
+    return result;
   }
 }
