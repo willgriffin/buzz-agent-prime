@@ -6,20 +6,21 @@ these contracts without updating this document.
 
 ## Commands
 
-The binary `buzz-agent-prime` exposes exactly four commands in v0.1:
+The binary `buzz-agent-prime` exposes the following commands in v0.1:
 
-| Command   | Status (v0.1) | Behaviour                                                                                                                                                                                        |
-| --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `acp`     | issue #3      | Speak ACP v2 NDJSON over stdin/stdout, one isolated `prime-agent --mode acp` subprocess per outer `session/new`. Strict stdout discipline: only ACP frames on stdout; all diagnostics on stderr. |
-| `serve`   | issue #4      | Launch `buzz-acp` with `buzz-agent-prime acp` as the agent command; supervise the process tree; durable session routing under the state directory.                                               |
-| `doctor`  | issue #4      | Non-destructive environment diagnostics (binaries, versions, state-directory writability, required configuration). Must never print secrets.                                                     |
-| `version` | implemented   | Print the installed package version and exit 0.                                                                                                                                                  |
+| Command     | Status (v0.1) | Behaviour                                                                                                                                                                                        |
+| ----------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `acp`       | issue #3      | Speak ACP v2 NDJSON over stdin/stdout, one isolated `prime-agent --mode acp` subprocess per outer `session/new`. Strict stdout discipline: only ACP frames on stdout; all diagnostics on stderr. |
+| `serve`     | issue #4      | Launch `buzz-acp` with `buzz-agent-prime acp` as the agent command; supervise the process tree; durable session routing under the state directory.                                               |
+| `doctor`    | issue #4      | Non-destructive environment diagnostics (binaries, versions, state-directory writability, required configuration). Must never print secrets.                                                     |
+| `pr-thread` | issue #35     | Read and verify a complete Buzz PR conversation. Accepts one 64-hex event id as `<id>`, `--event <id>`, or `--event=<id>` and writes chronological thread events as NDJSON.                      |
+| `version`   | implemented   | Print the installed package version and exit 0.                                                                                                                                                  |
 
 ### Exit codes
 
 - `0` success
-- `1` expected failure (command-specific)
-- `2` CLI usage error (unknown command / bad arguments)
+- `1` runtime, configuration, authentication, or relay failure (command-specific)
+- `2` CLI usage error (unknown command, missing/duplicate/bad arguments)
 - `3`+ reserved for runtime failures (documented per command as implemented)
 
 ### stdout discipline
@@ -57,6 +58,39 @@ fail without corrupting the stdout stream.
 
 v0.1 ships no configuration file format; configuration is environment-only.
 This avoids a config schema lock-in before `serve`/`doctor` mature.
+
+## PR-thread command (issue #35)
+
+`pr-thread` connects directly to the configured relay, completes NIP-42
+authentication with `BUZZ_PRIVATE_KEY`, and returns only the verification-
+filtered thread for the requested PR. It retrieves the PR root, updates,
+kind-1 and kind-1111 comments/reviews, and status events; stdout contains one
+chronological JSON object per line and stderr contains diagnostics only.
+
+Update and status authority is restricted to the verified PR author or the
+repository owner encoded by the PR; directly linked, signature-verified
+comments from any author are conversation context only and carry no lifecycle
+or review authority. This command does not resolve repository maintainer roles
+or external authorization. Its single-relay retrieval is bounded and depends
+on that relay honestly returning a complete response; it does not establish
+global relay completeness.
+
+Provide exactly one 64-character hexadecimal event id in one of these forms:
+
+```text
+buzz-agent-prime pr-thread <id>
+buzz-agent-prime pr-thread --event <id>
+buzz-agent-prime pr-thread --event=<id>
+```
+
+For this command, explicit caller options take precedence over environment
+variables. `BUZZ_RELAY_URL` then overrides the standard
+`ws://localhost:3000` default; `BUZZ_PRIVATE_KEY` is required and has no
+default. `http` and `https` relay origins are converted to `ws` and `wss`;
+`ws` and `wss` are preserved. The URL must be a bare origin: user info,
+non-root paths, queries, and fragments are rejected. Use `wss` in production;
+unencrypted `ws` is retained for local loopback development. Neither keys nor
+other credentials are emitted in command output.
 
 ## Compatibility guarantee
 

@@ -38,3 +38,25 @@ npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## Read a PR thread
+
+`pr-thread` reads a complete, verification-filtered Buzz PR conversation from
+the configured relay and writes its chronological events as NDJSON to stdout.
+Diagnostics and the event count go to stderr, so stdout can be piped safely.
+
+```bash
+buzz-agent-prime pr-thread <64-hex-event-id>
+buzz-agent-prime pr-thread --event <64-hex-event-id>
+buzz-agent-prime pr-thread --event=<64-hex-event-id>
+```
+
+The command uses an explicit caller option first, then `BUZZ_RELAY_URL` and
+`BUZZ_PRIVATE_KEY`; the relay URL otherwise defaults to `ws://localhost:3000`.
+HTTP(S) relay origins are converted to WebSocket origins; user info, paths,
+queries, and fragments are rejected. Use `wss://` (or `https://`) for
+production relays; unencrypted `ws://` remains supported for local loopback
+development. The private key is used only for NIP-42 authentication and is
+never printed. See
+[the PR-thread reference](docs/pr-thread.md) for lifecycle-authority and
+output details.

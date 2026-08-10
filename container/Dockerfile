@@ -51,7 +51,17 @@ COPY src/ src/
 RUN npm ci \
  && npm run build
 
-# ### Stage 3: uv binary fetch #################################################
+# ### Stage 3: production Node dependencies ####################################
+# Keep the runtime dependency closure separate from the TypeScript toolchain.
+FROM node:22-bookworm-slim AS app-production-deps
+
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts \
+ && npm ls --omit=dev --depth=0 \
+ && npm cache clean --force
+
+# ### Stage 4: uv binary fetch #################################################
 FROM debian:bookworm-slim AS uv-fetch
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -69,11 +79,11 @@ RUN case "$TARGETARCH" in \
  && cp /tmp/uv/uv-${ARCH}-unknown-linux-gnu/uv /usr/local/bin/uv \
  && chmod +x /usr/local/bin/uv
 
-# ### Stage 4: python3.12 + ipykernel (from python:3.12-slim) ##################
+# ### Stage 5: python3.12 + ipykernel (from python:3.12-slim) ##################
 FROM python:3.12-slim-bookworm AS python-runtime
 RUN pip install --no-cache-dir ipykernel
 
-# ### Stage 5: runtime (debian slim + copied layers) ###########################
+# ### Stage 6: runtime (debian slim + copied layers) ###########################
 FROM debian:bookworm-slim AS runtime
 
 # OCI labels.
@@ -120,6 +130,7 @@ COPY --from=rust-builder /src/target/release/buzz-acp /usr/local/bin/buzz-acp
 COPY --from=rust-builder /src/target/release/git-credential-nostr /usr/local/bin/git-credential-nostr
 COPY --from=app-builder /src/dist /opt/buzz-agent-prime/dist
 COPY --from=app-builder /src/package.json /opt/buzz-agent-prime/package.json
+COPY --from=app-production-deps /src/node_modules /opt/buzz-agent-prime/node_modules
 COPY LICENSE NOTICE.md /opt/buzz-agent-prime/
 
 # Executable symlinks.

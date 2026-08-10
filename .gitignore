@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .idea/
 .vscode/
+debug-relay.mjs
+debug2-relay.mjs
+test-relay.mjs
