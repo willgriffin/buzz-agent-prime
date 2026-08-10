@@ -20,9 +20,9 @@ export interface PrimeProbeResult {
   /** Protocol version Prime reported in its initialize response. */
   protocolVersion: number | string | undefined;
   /** Prime's `agentCapabilities` from its initialize response. */
-  capabilities: Record<string, unknown>;
+  agentCapabilities: Record<string, unknown>;
   /** Prime's `agentInfo` from its initialize response. */
-  info: Record<string, unknown>;
+  agentInfo: Record<string, unknown>;
   /** Prime's namespaced `_meta` from its initialize response. */
   meta: Record<string, unknown>;
 }
@@ -61,15 +61,14 @@ export async function probePrimeAgent(options: PrimeProbeOptions): Promise<Prime
 
   let result: PrimeProbeResult;
   try {
-    // We propose v2; the pinned Prime build may report a different version,
-    // which we capture rather than reject (see parseInitializeResult).
+    // We propose v2; the pinned Prime 0.7.1 build reports v1, which we
+    // capture rather than reject (see parseInitializeResult).
     const raw = await link.request(
       "initialize",
       {
         protocolVersion: 2,
-        capabilities: {},
         clientCapabilities: {},
-        info: options.clientInfo,
+        clientInfo: options.clientInfo,
       },
       { timeoutMs },
     );
@@ -91,14 +90,32 @@ function parseInitializeResult(raw: unknown, primeBin: string): PrimeProbeResult
     throw new Error(`prime-agent (${primeBin}) returned a non-object initialize result`);
   }
   const record = raw as Record<string, unknown>;
-  const protocolVersion =
-    typeof record.protocolVersion === "number" || typeof record.protocolVersion === "string"
-      ? (record.protocolVersion as number | string)
-      : undefined;
-  const capabilities = isRecord(record.capabilities) ? record.capabilities : {};
-  const info = isRecord(record.info) ? record.info : {};
-  const meta = isRecord(record._meta) ? record._meta : {};
-  return { protocolVersion, capabilities, info, meta };
+  const protocolVersion = readProtocolVersion(record, primeBin);
+  const agentCapabilities = readOptionalRecord(record, "agentCapabilities", primeBin);
+  const agentInfo = readOptionalRecord(record, "agentInfo", primeBin);
+  const meta = readOptionalRecord(record, "_meta", primeBin);
+  return { protocolVersion, agentCapabilities, agentInfo, meta };
+}
+
+function readProtocolVersion(record: Record<string, unknown>, primeBin: string): number | string {
+  const value = record.protocolVersion;
+  if (typeof value === "number" || typeof value === "string") return value;
+  throw new Error(
+    `prime-agent (${primeBin}) returned an initialize result without a numeric or string protocolVersion`,
+  );
+}
+
+function readOptionalRecord(
+  record: Record<string, unknown>,
+  field: string,
+  primeBin: string,
+): Record<string, unknown> {
+  const value = record[field];
+  if (value === undefined) return {};
+  if (isRecord(value)) return value;
+  throw new Error(
+    `prime-agent (${primeBin}) returned an initialize result with a non-object ${field}`,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -55,19 +55,19 @@ async function stopAll() {
 afterEach(stopAll);
 
 describe("ACP multiplexer: initialize", () => {
-  it("probes prime-agent and preserves capabilities + namespaced metadata", async () => {
+  it("probes prime-agent and returns standard ACP fields with namespaced metadata", async () => {
     const h = harness();
     const init = await initialize(h);
     const result = init.result as Record<string, unknown>;
     expect(result.protocolVersion).toBe(PROTOCOL_VERSION);
-    expect(result.info).toMatchObject({ name: "buzz-agent-prime", title: "Buzz Agent Prime" });
-    expect(result.capabilities).toMatchObject({
+    expect(result.agentInfo).toMatchObject({ name: "buzz-agent-prime", title: "Buzz Agent Prime" });
+    expect(result.agentCapabilities).toMatchObject({
       loadSession: false,
       promptCapabilities: { image: true, embeddedContext: true },
       sessionCapabilities: { close: {} },
     });
     const meta = result._meta as Record<string, unknown>;
-    expect(meta["ai.primeintellect.prime-agent"]).toMatchObject({ probe: true });
+    expect(meta["ai.primeintellect.prime-agent"]).toEqual({});
     const buzz = meta["ai.buzz.buzz-agent-prime"] as Record<string, unknown>;
     expect(buzz).toMatchObject({ multiplexer: { protocolVersion: 2, maxSessions: 4 } });
   });

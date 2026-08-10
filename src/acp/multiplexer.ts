@@ -228,12 +228,12 @@ export class AcpMultiplexer {
       const probe = await this.#initializeProbe();
       await this.#respond(id, {
         protocolVersion: PROTOCOL_VERSION,
-        info: {
+        agentInfo: {
           name: "buzz-agent-prime",
           title: "Buzz Agent Prime",
           version: this.#options.clientInfo.version,
         },
-        capabilities: { ...probe.capabilities },
+        agentCapabilities: { ...probe.agentCapabilities },
         authMethods: [],
         _meta: {
           ...probe.meta,
@@ -244,7 +244,7 @@ export class AcpMultiplexer {
             },
             upstream: {
               name: "prime-agent",
-              version: readString(probe.info, "version"),
+              version: readString(probe.agentInfo, "version"),
               protocolVersion: probe.protocolVersion,
             },
           },

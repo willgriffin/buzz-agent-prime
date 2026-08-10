@@ -249,8 +249,8 @@ async function handleRequest(msg) {
   if (method === "initialize") {
     respond(id, {
       protocolVersion: PROTOCOL_VERSION,
-      info: { name: "mock-prime-agent", version: "0.0.0-mock" },
-      capabilities: {
+      agentInfo: { name: "mock-prime-agent", version: "0.0.0-mock" },
+      agentCapabilities: {
         session: {},
       },
     });
