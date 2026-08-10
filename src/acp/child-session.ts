@@ -160,8 +160,8 @@ export class ChildSession {
       "initialize",
       {
         protocolVersion: PROTOCOL_VERSION,
-        info: this.#clientInfo,
-        capabilities: {},
+        clientInfo: this.#clientInfo,
+        clientCapabilities: {},
       },
       { timeoutMs: this.#initTimeoutMs },
     )) as Record<string, unknown>;

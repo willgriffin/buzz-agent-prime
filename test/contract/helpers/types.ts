@@ -94,15 +94,15 @@ export interface ClientCapabilities {
 
 export interface InitializeRequestParams {
   protocolVersion: number;
-  info: Implementation;
-  capabilities?: ClientCapabilities;
+  clientInfo: Implementation;
+  clientCapabilities?: ClientCapabilities;
   _meta?: Record<string, unknown> | null;
 }
 
 export interface InitializeResponseResult {
   protocolVersion: number;
-  info: Implementation;
-  capabilities?: AgentCapabilities;
+  agentInfo: Implementation;
+  agentCapabilities?: AgentCapabilities;
   authMethods?: unknown[];
   _meta?: Record<string, unknown> | null;
 }

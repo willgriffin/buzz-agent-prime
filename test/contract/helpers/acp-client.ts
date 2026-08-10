@@ -83,7 +83,8 @@ export async function isAcpImplemented(worktreeDir: string): Promise<boolean> {
       method: "initialize",
       params: {
         protocolVersion: 2,
-        info: { name: "buzz-test-probe", version: "0.0.0" },
+        clientCapabilities: {},
+        clientInfo: { name: "buzz-test-probe", version: "0.0.0" },
       },
     };
     try {
@@ -363,7 +364,8 @@ export class AcpClient {
   async initialize(): Promise<InitializeResponseResult> {
     const id = this.sendRequest("initialize", {
       protocolVersion: 2,
-      info: { name: "buzz-test-client", version: "0.0.0" },
+      clientCapabilities: {},
+      clientInfo: { name: "buzz-test-client", version: "0.0.0" },
     });
     const resp = await this.awaitResponse(id);
     if (isError(resp)) {

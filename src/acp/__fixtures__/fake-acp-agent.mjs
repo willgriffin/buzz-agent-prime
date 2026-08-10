@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import pinnedInitializeResult from "./prime-agent-0.7.1-initialize.json" with { type: "json" };
+
 /**
  * A minimal ACP v2 agent used to exercise the buzz-agent-prime multiplexer
  * without a real prime-agent installation.
@@ -23,7 +25,10 @@ function envConfig() {
     promptDelayMs: Number(env.FAKE_AGENT_PROMPT_DELAY_MS ?? 0),
     garbage: env.FAKE_AGENT_GARBAGE === "1",
     metaResult: env.FAKE_AGENT_META_RESULT === "1",
-    protocolVersion: Number(env.FAKE_AGENT_PROTOCOL_VERSION ?? 2),
+    malformedInitialize: env.FAKE_AGENT_MALFORMED_INITIALIZE === "1",
+    omitOptionalInitialize: env.FAKE_AGENT_OMIT_OPTIONAL_INITIALIZE === "1",
+    nullOptionalInitialize: env.FAKE_AGENT_NULL_OPTIONAL_INITIALIZE === "1",
+    protocolVersion: Number(env.FAKE_AGENT_PROTOCOL_VERSION ?? 1),
     exitCode: Number(env.FAKE_AGENT_EXIT_CODE ?? 0),
   };
 }
@@ -75,16 +80,33 @@ function handleLine(message) {
   switch (method) {
     case "initialize": {
       if (config.hangOnInitialize) return;
-      respond(id, {
-        protocolVersion: config.protocolVersion,
-        info: { name: "fake-prime-agent", title: "Fake Prime Agent", version: "9.9.9" },
-        capabilities: {
-          loadSession: false,
-          promptCapabilities: { image: true, embeddedContext: true },
-          sessionCapabilities: { close: {} },
-        },
-        _meta: { "ai.primeintellect.prime-agent": { instance: config.instance, probe: true } },
-      });
+      if (
+        typeof params?.clientCapabilities !== "object" ||
+        params.clientCapabilities === null ||
+        typeof params?.clientInfo !== "object" ||
+        params.clientInfo === null
+      ) {
+        respondError(id, -32602, "initialize requires clientCapabilities and clientInfo");
+        return;
+      }
+      if (config.malformedInitialize) {
+        respond(id, { protocolVersion: config.protocolVersion, agentCapabilities: null });
+        return;
+      }
+      if (config.omitOptionalInitialize) {
+        respond(id, { protocolVersion: config.protocolVersion });
+        return;
+      }
+      if (config.nullOptionalInitialize) {
+        respond(id, {
+          ...pinnedInitializeResult,
+          protocolVersion: config.protocolVersion,
+          agentInfo: null,
+          _meta: null,
+        });
+        return;
+      }
+      respond(id, { ...pinnedInitializeResult, protocolVersion: config.protocolVersion });
       return;
     }
     case "session/new": {

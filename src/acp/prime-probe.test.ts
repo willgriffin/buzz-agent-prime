@@ -1,26 +1,58 @@
 import { describe, expect, it } from "vitest";
 import { probePrimeAgent } from "./prime-probe.js";
 import { FAKE_AGENT } from "./test-utils.js";
+import pinnedInitializeResult from "./__fixtures__/prime-agent-0.7.1-initialize.json" with { type: "json" };
 
 const CLIENT_INFO = { name: "buzz-agent-prime", version: "0.1.0-test" };
 
 describe("probePrimeAgent", () => {
-  it("captures capabilities, info, and namespaced metadata from prime-agent", async () => {
+  it("captures the pinned Prime 0.7.1 initialize shape and preserves _meta", async () => {
     const result = await probePrimeAgent({
       primeBin: FAKE_AGENT,
       clientInfo: CLIENT_INFO,
       cwd: process.cwd(),
       env: { FAKE_AGENT_INSTANCE: "probe-instance" },
     });
-    expect(result.capabilities).toMatchObject({
-      loadSession: false,
-      promptCapabilities: { image: true, embeddedContext: true },
-      sessionCapabilities: { close: {} },
+    expect(result.protocolVersion).toBe(pinnedInitializeResult.protocolVersion);
+    expect(result.agentCapabilities).toEqual(pinnedInitializeResult.agentCapabilities);
+    expect(result.agentInfo).toEqual(pinnedInitializeResult.agentInfo);
+    expect(result.meta).toEqual(pinnedInitializeResult._meta);
+  });
+
+  it("tolerates omitted optional initialize fields", async () => {
+    const result = await probePrimeAgent({
+      primeBin: FAKE_AGENT,
+      clientInfo: CLIENT_INFO,
+      cwd: process.cwd(),
+      env: { FAKE_AGENT_OMIT_OPTIONAL_INITIALIZE: "1" },
     });
-    expect(result.info).toMatchObject({ name: "fake-prime-agent", version: "9.9.9" });
-    expect(result.meta).toEqual({
-      "ai.primeintellect.prime-agent": { instance: "probe-instance", probe: true },
+    expect(result.protocolVersion).toBe(1);
+    expect(result.agentCapabilities).toEqual({});
+    expect(result.agentInfo).toEqual({});
+    expect(result.meta).toEqual({});
+  });
+
+  it("normalizes nullable optional initialize fields", async () => {
+    const result = await probePrimeAgent({
+      primeBin: FAKE_AGENT,
+      clientInfo: CLIENT_INFO,
+      cwd: process.cwd(),
+      env: { FAKE_AGENT_NULL_OPTIONAL_INITIALIZE: "1" },
     });
+    expect(result.agentCapabilities).toEqual(pinnedInitializeResult.agentCapabilities);
+    expect(result.agentInfo).toEqual({});
+    expect(result.meta).toEqual({});
+  });
+
+  it("rejects a null required agentCapabilities response", async () => {
+    await expect(
+      probePrimeAgent({
+        primeBin: FAKE_AGENT,
+        clientInfo: CLIENT_INFO,
+        cwd: process.cwd(),
+        env: { FAKE_AGENT_MALFORMED_INITIALIZE: "1" },
+      }),
+    ).rejects.toThrow(/non-object agentCapabilities/);
   });
 
   it("rejects when the executable cannot be spawned", async () => {
@@ -55,7 +87,7 @@ describe("probePrimeAgent", () => {
       env: { FAKE_AGENT_PROTOCOL_VERSION: "1" },
     });
     expect(result.protocolVersion).toBe(1);
-    expect(result.capabilities).toMatchObject({
+    expect(result.agentCapabilities).toMatchObject({
       loadSession: false,
       promptCapabilities: { image: true, embeddedContext: true },
     });

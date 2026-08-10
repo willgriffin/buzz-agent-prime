@@ -97,7 +97,7 @@ describe("ACP framing contract", () => {
       if (!acpReady) return;
       await withClient({}, async (c) => {
         const result = await c.initialize();
-        expect(result.capabilities).toBeDefined();
+        expect(result.agentCapabilities).toBeDefined();
         // Session capability is present when the upstream Prime build
         // reports it (v2); the locally installed v0.7.1 returns empty
         // capabilities, so only check it exists, not its shape.
@@ -150,7 +150,11 @@ describe("ACP framing — malformed input handling", () => {
             jsonrpc: "2.0",
             id: 1,
             method: "initialize",
-            params: { protocolVersion: 2, info: { name: "test", version: "0" } },
+            params: {
+              protocolVersion: 2,
+              clientCapabilities: {},
+              clientInfo: { name: "test", version: "0" },
+            },
           }),
         );
         const resp = await c.awaitResponse(1);
@@ -171,7 +175,8 @@ describe("ACP framing — size bounds", () => {
         method: "initialize",
         params: {
           protocolVersion: 2,
-          info: { name: "test", version: "0" },
+          clientCapabilities: {},
+          clientInfo: { name: "test", version: "0" },
           _meta: { padding: "x".repeat(DEFAULT_MAX_FRAME_SIZE + 100) },
         },
       });
@@ -182,7 +187,8 @@ describe("ACP framing — size bounds", () => {
       // Either way, it should still be alive
       const initId = c.sendRequest("initialize", {
         protocolVersion: 2,
-        info: { name: "test", version: "0" },
+        clientCapabilities: {},
+        clientInfo: { name: "test", version: "0" },
       });
       const resp = await c.awaitResponse(initId);
       expect(isError(resp) || isResult(resp)).toBe(true);

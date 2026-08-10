@@ -49,9 +49,9 @@ spec:
               memory: 4Gi
 
           volumeMounts:
-            - name: state
+            - name: buzz-agent-prime-state
               mountPath: /var/lib/buzz-agent-prime
-            - name: state
+            - name: buzz-agent-prime-state
               mountPath: /workspace
               subPath: workspace
             - name: tmp
@@ -84,6 +84,8 @@ spec:
 
   volumeClaimTemplates:
     - metadata:
+        # Keep this established name: it resolves the pod mounts and preserves
+        # the existing buzz-agent-prime-state-buzz-agent-prime-0 PVC.
         name: buzz-agent-prime-state
       spec:
         accessModes:
