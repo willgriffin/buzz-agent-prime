@@ -27,7 +27,9 @@ spec:
       # container, so pod replacement keeps repository checkouts durable.
       initContainers:
         - name: initialize-workspace
-          image: busybox:1.36.1
+          # Reuse the application image rather than introducing a second
+          # runtime image solely to create this directory.
+          image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0
           command: ["sh", "-ec", "mkdir -p /var/lib/buzz-agent-prime/workspace"]
           securityContext:
             runAsNonRoot: true

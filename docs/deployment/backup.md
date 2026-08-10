@@ -105,6 +105,8 @@ docker compose --file deploy/docker/docker-compose.yml up -d
 ```bash
 # Scale down the StatefulSet so state and its workspace subpath are consistent.
 kubectl scale statefulset buzz-agent-prime -n buzz-agents --replicas=0
+# Wait for the ordinal pod to release the ReadWriteOnce PVC before mounting it.
+kubectl wait -n buzz-agents --for=delete pod/buzz-agent-prime-0 --timeout=60s
 
 # Run a temporary helper against the StatefulSet PVC and copy the complete
 # state directory. It includes `workspace`, which backs `/workspace`.

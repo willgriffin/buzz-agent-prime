@@ -58,6 +58,9 @@ function assertRenderedStatefulSet(path: string, expectedName: string): void {
   expect(statefulSet).toContain("terminationGracePeriodSeconds: 30");
   expect(statefulSet).toContain("resources:");
   expect(statefulSet).toContain("name: initialize-workspace");
+  expect(statefulSet).toMatch(
+    /initContainers:[\s\S]*?image: ghcr\.io\/willgriffin\/buzz-agent-prime:0\.1\.0[\s\S]*?name: initialize-workspace/,
+  );
   expect(statefulSet).toContain("mkdir -p /var/lib/buzz-agent-prime/workspace");
   expect(statefulSet).toContain("mountPath: /workspace");
   expect(statefulSet).toContain("subPath: workspace");

@@ -11,9 +11,9 @@
  * process-group timeout so an unavailable CLI or daemon fails cleanly.
  */
 
-import { spawn } from "node:child_process";
+import { runDockerCommand } from "../../helpers/docker.js";
 
-const dockerCommandTimeoutMs = 5000;
+export { isDockerAvailable, isDockerImageAvailable } from "../../helpers/docker.js";
 
 export interface ContainerConfig {
   /** Container name prefix (suffixed with random ID). */
@@ -57,86 +57,10 @@ export interface ContainerInfo {
 }
 
 /**
- * Check if Docker is available on the system.
- */
-export async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await docker(["info"]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Check for the image used by the explicit Docker E2E job. */
-export async function isDockerImageAvailable(image: string): Promise<boolean> {
-  try {
-    await docker(["image", "inspect", image]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Run a Docker command and return stdout.
- */
-function docker(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("docker", args, {
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      callback();
-    };
-    const killProcessGroup = () => {
-      if (child.pid && process.platform !== "win32") {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-        } catch {
-          // The command already exited or the process group is unavailable.
-        }
-      } else {
-        child.kill("SIGKILL");
-      }
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-    };
-    const timeout = setTimeout(() => {
-      killProcessGroup();
-      finish(() => reject(new Error(`docker ${args[0] ?? "command"} timed out`)));
-    }, dockerCommandTimeoutMs);
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk;
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk;
-    });
-    child.once("error", (error) => finish(() => reject(error)));
-    child.once("close", (code) => {
-      if (code === 0) {
-        finish(() => resolve(stdout.trim()));
-      } else {
-        finish(() => reject(new Error(stderr.trim() || `docker exited with status ${code}`)));
-      }
-    });
-  });
-}
-
-/**
  * Create a Docker volume for PVC-style persistence testing.
  */
 export async function createVolume(name: string): Promise<string> {
-  await docker(["volume", "create", name]);
+  await runDockerCommand(["volume", "create", name]);
   return name;
 }
 
@@ -145,7 +69,7 @@ export async function createVolume(name: string): Promise<string> {
  */
 export async function removeVolume(name: string): Promise<void> {
   try {
-    await docker(["volume", "rm", "-f", name]);
+    await runDockerCommand(["volume", "rm", "-f", name]);
   } catch {
     // ignore
   }
@@ -208,7 +132,7 @@ export async function startContainer(config: ContainerConfig): Promise<string> {
     args.push(...config.command);
   }
 
-  return await docker(args);
+  return await runDockerCommand(args);
 }
 
 /**
@@ -216,7 +140,7 @@ export async function startContainer(config: ContainerConfig): Promise<string> {
  */
 export async function stopContainer(name: string): Promise<void> {
   try {
-    await docker(["stop", "-t", "10", name]);
+    await runDockerCommand(["stop", "-t", "10", name], { timeoutMs: 15000 });
   } catch {
     // ignore
   }
@@ -226,7 +150,7 @@ export async function stopContainer(name: string): Promise<void> {
  * Restart a stopped container.
  */
 export async function restartContainer(name: string): Promise<void> {
-  await docker(["start", name]);
+  await runDockerCommand(["start", name]);
 }
 
 /**
@@ -234,7 +158,7 @@ export async function restartContainer(name: string): Promise<void> {
  */
 export async function removeContainer(name: string): Promise<void> {
   try {
-    await docker(["rm", "-f", name]);
+    await runDockerCommand(["rm", "-f", name]);
   } catch {
     // ignore
   }
@@ -244,7 +168,7 @@ export async function removeContainer(name: string): Promise<void> {
  * Get container info (status, running state).
  */
 export async function getContainerInfo(name: string): Promise<ContainerInfo> {
-  const inspect = await docker([
+  const inspect = await runDockerCommand([
     "inspect",
     "--format",
     "{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}",
@@ -263,14 +187,14 @@ export async function getContainerInfo(name: string): Promise<ContainerInfo> {
  * Execute a command inside a running container and return stdout.
  */
 export async function execInContainer(name: string, command: string[]): Promise<string> {
-  return await docker(["exec", name, ...command]);
+  return await runDockerCommand(["exec", name, ...command]);
 }
 
 /**
  * Get container logs.
  */
 export async function getContainerLogs(name: string): Promise<string> {
-  return await docker(["logs", name]);
+  return await runDockerCommand(["logs", name]);
 }
 
 /**

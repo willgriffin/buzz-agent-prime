@@ -206,7 +206,7 @@ restart. Ephemeral sessions start fresh.
 The credential-free workspace persistence scenarios are intentionally not part
 of ordinary `npm test` runs, because they require a live Docker daemon and a
 locally built `buzz-agent-prime:dev` image. A Docker-enabled CI job (or an
-operator validating an image locally) runs them explicitly:
+operator validating an image locally) can run them explicitly:
 
 ```bash
 BUZZ_AGENT_PRIME_DOCKER_E2E=1 npm test -- \
@@ -215,6 +215,8 @@ BUZZ_AGENT_PRIME_DOCKER_E2E=1 npm test -- \
 
 With the opt-in set, missing Docker or the image is a test failure. Without
 it, the scenarios are reported as skipped and do not invoke the Docker CLI.
+The repository's ordinary CI job deliberately does not build an image or set
+this opt-in; #27 owns adding a deterministic Docker-enabled CI gate.
 
 ## Upgrading
 
