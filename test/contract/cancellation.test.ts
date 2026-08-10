@@ -49,7 +49,7 @@ describe("Cancellation — active work", () => {
       const session = await client.newSession("/tmp");
 
       // Start a prompt (it'll take ~1s because of responseDelayMs)
-      const _promptPromise = client.prompt(session.sessionId, "long running");
+      const promptPromise = client.prompt(session.sessionId, "long running");
 
       // Wait for work to start, then cancel
       await new Promise((r) => setTimeout(r, 200));
@@ -65,6 +65,7 @@ describe("Cancellation — active work", () => {
         return p.update.sessionUpdate === "state_update" && p.update.stopReason === "cancelled";
       });
       expect(cancelledStates.length).toBeGreaterThan(0);
+      expect(isResult((await promptPromise).response)).toBe(true);
     } finally {
       client.kill("SIGKILL");
     }
@@ -80,11 +81,12 @@ describe("Cancellation — session survives cancellation", () => {
       const session = await client.newSession("/tmp");
 
       // Start and cancel a prompt
-      const _promptPromise = client.prompt(session.sessionId, "cancel me");
+      const promptPromise = client.prompt(session.sessionId, "cancel me");
       await new Promise((r) => setTimeout(r, 200));
       client.cancel(session.sessionId);
       await new Promise((r) => setTimeout(r, 600));
       client.collectAll();
+      expect(isResult((await promptPromise).response)).toBe(true);
 
       // Should be able to send a new prompt
       const { response } = await client.prompt(session.sessionId, "after cancel");
