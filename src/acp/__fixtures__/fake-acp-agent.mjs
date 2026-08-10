@@ -27,6 +27,7 @@ function envConfig() {
     metaResult: env.FAKE_AGENT_META_RESULT === "1",
     malformedInitialize: env.FAKE_AGENT_MALFORMED_INITIALIZE === "1",
     omitOptionalInitialize: env.FAKE_AGENT_OMIT_OPTIONAL_INITIALIZE === "1",
+    nullOptionalInitialize: env.FAKE_AGENT_NULL_OPTIONAL_INITIALIZE === "1",
     protocolVersion: Number(env.FAKE_AGENT_PROTOCOL_VERSION ?? 1),
     exitCode: Number(env.FAKE_AGENT_EXIT_CODE ?? 0),
   };
@@ -89,11 +90,20 @@ function handleLine(message) {
         return;
       }
       if (config.malformedInitialize) {
-        respond(id, { protocolVersion: config.protocolVersion, agentCapabilities: [] });
+        respond(id, { protocolVersion: config.protocolVersion, agentCapabilities: null });
         return;
       }
       if (config.omitOptionalInitialize) {
         respond(id, { protocolVersion: config.protocolVersion });
+        return;
+      }
+      if (config.nullOptionalInitialize) {
+        respond(id, {
+          ...pinnedInitializeResult,
+          protocolVersion: config.protocolVersion,
+          agentInfo: null,
+          _meta: null,
+        });
         return;
       }
       respond(id, { ...pinnedInitializeResult, protocolVersion: config.protocolVersion });

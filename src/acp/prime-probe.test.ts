@@ -32,7 +32,19 @@ describe("probePrimeAgent", () => {
     expect(result.meta).toEqual({});
   });
 
-  it("fails clearly for malformed initialize responses", async () => {
+  it("normalizes nullable optional initialize fields", async () => {
+    const result = await probePrimeAgent({
+      primeBin: FAKE_AGENT,
+      clientInfo: CLIENT_INFO,
+      cwd: process.cwd(),
+      env: { FAKE_AGENT_NULL_OPTIONAL_INITIALIZE: "1" },
+    });
+    expect(result.agentCapabilities).toEqual(pinnedInitializeResult.agentCapabilities);
+    expect(result.agentInfo).toEqual({});
+    expect(result.meta).toEqual({});
+  });
+
+  it("rejects a null required agentCapabilities response", async () => {
     await expect(
       probePrimeAgent({
         primeBin: FAKE_AGENT,

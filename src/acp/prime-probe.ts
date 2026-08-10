@@ -92,8 +92,8 @@ function parseInitializeResult(raw: unknown, primeBin: string): PrimeProbeResult
   const record = raw as Record<string, unknown>;
   const protocolVersion = readProtocolVersion(record, primeBin);
   const agentCapabilities = readOptionalRecord(record, "agentCapabilities", primeBin);
-  const agentInfo = readOptionalRecord(record, "agentInfo", primeBin);
-  const meta = readOptionalRecord(record, "_meta", primeBin);
+  const agentInfo = readOptionalRecord(record, "agentInfo", primeBin, { nullable: true });
+  const meta = readOptionalRecord(record, "_meta", primeBin, { nullable: true });
   return { protocolVersion, agentCapabilities, agentInfo, meta };
 }
 
@@ -109,9 +109,10 @@ function readOptionalRecord(
   record: Record<string, unknown>,
   field: string,
   primeBin: string,
+  options: { nullable?: boolean } = {},
 ): Record<string, unknown> {
   const value = record[field];
-  if (value === undefined) return {};
+  if (value === undefined || (options.nullable && value === null)) return {};
   if (isRecord(value)) return value;
   throw new Error(
     `prime-agent (${primeBin}) returned an initialize result with a non-object ${field}`,
