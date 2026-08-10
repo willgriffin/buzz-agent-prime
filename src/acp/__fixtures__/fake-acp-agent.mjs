@@ -19,6 +19,7 @@ function envConfig() {
     instance: env.FAKE_AGENT_INSTANCE ?? "fake",
     emitUpdates: env.FAKE_AGENT_EMIT_UPDATES === "1",
     dieOnPrompt: env.FAKE_AGENT_DIE_ON_PROMPT === "1",
+    signalOnPrompt: env.FAKE_AGENT_SIGNAL_ON_PROMPT,
     hangOnPrompt: env.FAKE_AGENT_HANG_ON_PROMPT === "1",
     hangOnInitialize: env.FAKE_AGENT_HANG_ON_INITIALIZE === "1",
     requestPermission: env.FAKE_AGENT_REQUEST_PERMISSION === "1",
@@ -137,6 +138,10 @@ function handleLine(message) {
     case "session/prompt": {
       if (config.dieOnPrompt) {
         process.exit(3);
+        return;
+      }
+      if (typeof config.signalOnPrompt === "string") {
+        process.kill(process.pid, config.signalOnPrompt);
         return;
       }
       if (config.emitUpdates && currentSessionId !== undefined) {

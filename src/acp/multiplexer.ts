@@ -105,10 +105,12 @@ export class AcpMultiplexer {
   readonly #logger: Logger;
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #durableKeys = new Map<string, string>();
-  /** Sessions intentionally terminated by the multiplexer (close, cancel,
-   *  shutdown).  Used to distinguish `reason: "killed"` from natural exit
-   *  or crash in the `childExited` notification (#20). */
-  readonly #killedSessions = new Set<string>();
+  /**
+   * Child exits initiated by the multiplexer. A clean expected exit is a
+   * normal lifecycle event, not a child failure, so it must not produce
+   * `childExited` metadata or error diagnostics (#20).
+   */
+  readonly #expectedChildExits = new Map<string, "session close" | "adapter shutdown">();
   /** Session directories currently in use — guards duplicate named sessions
    *  that share a `--session-dir` when `_meta.sessionTitle` is set but
    *  `_meta.durableSessionKey` is not (#13 follow-up). */
@@ -154,7 +156,7 @@ export class AcpMultiplexer {
     this.#shuttingDown = true;
     const cleanups: Promise<void>[] = [];
     for (const record of this.#sessions.values()) {
-      this.#killedSessions.add(record.outerSessionId);
+      this.#expectedChildExits.set(record.outerSessionId, "adapter shutdown");
       cleanups.push(record.child.terminate().catch(() => undefined));
     }
     for (const creation of this.#pendingCreations.values()) {
@@ -172,7 +174,7 @@ export class AcpMultiplexer {
     await Promise.allSettled(cleanups);
     this.#sessions.clear();
     this.#durableKeys.clear();
-    this.#killedSessions.clear();
+    this.#expectedChildExits.clear();
     this.#liveSessionDirs.clear();
     this.#pendingCreations.clear();
     this.#pendingPrompts.clear();
@@ -456,7 +458,7 @@ export class AcpMultiplexer {
         this.#pendingPrompts.delete(promptId);
       }
     }
-    this.#killedSessions.add(session.outerSessionId);
+    this.#expectedChildExits.set(session.outerSessionId, "session close");
     await session.child.close();
     this.#dropSession(session.outerSessionId);
     this.#logger.info(`session ${session.outerSessionId} closed`);
@@ -574,18 +576,22 @@ export class AcpMultiplexer {
     code: number | null,
     signal: NodeJS.Signals | null,
   ): void {
+    const expectedExit = this.#expectedChildExits.get(outerSessionId);
+    this.#expectedChildExits.delete(outerSessionId);
     const session = this.#sessions.get(outerSessionId);
     if (session === undefined) return;
     this.#dropSession(outerSessionId);
-    // Surface the exit to the outer client as namespaced metadata so a
-    // harness can distinguish an agent-chosen stop from a subprocess death.
-    // Clean up the per-session killed flag; use it for notification + log level.
-    const wasKilled = this.#killedSessions.delete(outerSessionId);
-    const reason: string = wasKilled
-      ? "killed"
-      : code !== 0 || signal !== null
-        ? "crashed"
-        : "exited";
+    if (expectedExit !== undefined && code === 0 && signal === null) {
+      this.#logger.info(
+        `session ${outerSessionId}: child exited after ${expectedExit} ` +
+          `(code ${String(code)}, signal ${String(signal)})`,
+      );
+      return;
+    }
+    // Surface every unexpected exit and any nonzero/signal termination to the
+    // outer client so a harness can distinguish an agent-chosen stop from a
+    // subprocess failure.
+    const reason = code !== 0 || signal !== null ? "crashed" : "exited";
     const update: Record<string, unknown> = {
       sessionUpdate: "session_info_update",
       _meta: {
@@ -600,7 +606,7 @@ export class AcpMultiplexer {
       },
     };
     this.#forwardUpdate(outerSessionId, update);
-    this.#logger[reason === "killed" ? "info" : "error"](
+    this.#logger.error(
       `session ${outerSessionId}: child ${reason} (code ${String(code)}, signal ${String(signal)})`,
     );
   }
