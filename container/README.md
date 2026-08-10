@@ -63,7 +63,8 @@ printf '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":2,"in
 
 ## Non-root + read-only rootfs
 
-The image runs as UID 1001 (non-root). Add `--read-only` with tmpfs mounts for state:
+The image runs as UID 1001 (non-root). For an ephemeral smoke test, add
+`--read-only` with tmpfs mounts for writable paths:
 
 ```bash
 docker run --rm --read-only \
@@ -72,6 +73,11 @@ docker run --rm --read-only \
   --tmpfs /tmp \
   ghcr.io/willgriffin/buzz-agent-prime:0.1.0 doctor
 ```
+
+This tmpfs example intentionally discards state and workspaces on container
+replacement. For a persistent deployment, use the named volumes in
+`deploy/docker/run.sh` or `deploy/docker/docker-compose.yml`: state mounts at
+`/var/lib/buzz-agent-prime` and repository checkouts mount at `/workspace`.
 
 ## Reproducibility
 

@@ -19,7 +19,8 @@ The Docker deployment runs a single container that includes:
 - `prime-agent` (pinned at v0.7.1)
 - `buzz-acp` (pinned at 0.5.3 / `3a96acea`)
 - Node.js 22 and Python 3.12 runtimes
-- A persistent volume mounted at `/var/lib/buzz-agent-prime`
+- A persistent state volume mounted at `/var/lib/buzz-agent-prime`
+- A separate persistent workspace volume mounted at `/workspace`
 
 The container image is built by the Container worker (issue #5) from
 `container/`. The Compose manifest is maintained by the Docker worker (issue
@@ -85,8 +86,8 @@ service with:
 - **Image:** the published container image (e.g.
   `ghcr.io/willgriffin/buzz-agent-prime:0.1.0`) or built from `container/`.
 - **Environment:** loaded from `.env` or individual `environment:` entries.
-- **Volumes:** a named or bind-mounted volume for
-  `/var/lib/buzz-agent-prime` (persistent state).
+- **Volumes:** named or bind-mounted volumes for both
+  `/var/lib/buzz-agent-prime` (state) and `/workspace` (repository checkouts).
 - **Restart policy:** `unless-stopped` (or `always`).
 - **Read-only root filesystem** with `tmpfs` for `/tmp` and the state tmp dir.
 - **Non-root user:** the container runs as a dedicated unprivileged user.
@@ -101,13 +102,15 @@ services:
     env_file: .env
     volumes:
       - buzz-agent-prime-state:/var/lib/buzz-agent-prime
+      - buzz-agent-prime-workspace:/workspace
     tmpfs:
       - /tmp
     read_only: true
-    user: "1000:1000"
+    user: "1001:1001"
 
 volumes:
   buzz-agent-prime-state:
+  buzz-agent-prime-workspace:
 ```
 
 ### Dockerfile
@@ -128,30 +131,34 @@ multi-stage builds the image:
 All configuration is environment-based — v0.1 ships no configuration file.
 See the full [contracts](../contracts.md) for all variables.
 
-| Variable                         | Default                     | Purpose                             |
-| -------------------------------- | --------------------------- | ----------------------------------- |
-| `BUZZ_RELAY_URL`                 | `ws://localhost:3000`       | Relay WebSocket URL.                |
-| `BUZZ_PRIVATE_KEY`               | —                           | Agent Nostr identity (nsec or hex). |
-| `BUZZ_ACP_RESPOND_TO`            | `owner-only`                | Inbound author gate.                |
-| `BUZZ_AGENT_PRIME_MAX_SESSIONS`  | `4`                         | Maximum concurrent sessions.        |
-| `BUZZ_AGENT_PRIME_STATE_DIR`     | `/var/lib/buzz-agent-prime` | Persistent state directory.         |
-| `BUZZ_AGENT_PRIME_WORKSPACE_DIR` | `<state>/workspace`         | Default session working directory.  |
-| `BUZZ_AGENT_PRIME_TMP_DIR`       | `<state>/tmp`               | Writable scratch space.             |
-| `BUZZ_ACP_HEARTBEAT_INTERVAL`    | `0`                         | Heartbeat interval (0=disabled).    |
+| Variable                         | Default                     | Purpose                               |
+| -------------------------------- | --------------------------- | ------------------------------------- |
+| `BUZZ_RELAY_URL`                 | `ws://localhost:3000`       | Relay WebSocket URL.                  |
+| `BUZZ_PRIVATE_KEY`               | —                           | Agent Nostr identity (nsec or hex).   |
+| `BUZZ_ACP_RESPOND_TO`            | `owner-only`                | Inbound author gate.                  |
+| `BUZZ_AGENT_PRIME_MAX_SESSIONS`  | `4`                         | Maximum concurrent sessions.          |
+| `BUZZ_AGENT_PRIME_STATE_DIR`     | `/var/lib/buzz-agent-prime` | Persistent state directory.           |
+| `BUZZ_AGENT_PRIME_WORKSPACE_DIR` | `/workspace`                | Persistent session working directory. |
+| `BUZZ_AGENT_PRIME_TMP_DIR`       | `<state>/tmp`               | Writable scratch space.               |
+| `BUZZ_ACP_HEARTBEAT_INTERVAL`    | `0`                         | Heartbeat interval (0=disabled).      |
 
 ## Persistent state
 
-The state directory at `/var/lib/buzz-agent-prime` holds:
+The named state volume at `/var/lib/buzz-agent-prime` holds:
 
 - **Named-channel sessions:** kernel checkpoints and artifacts keyed by
   channel title (from `_meta.sessionTitle`). These survive container restarts.
 - **Ephemeral sessions:** sessions without `_meta.sessionTitle` are not
   persisted across restarts.
-- **Repository checkouts:** git repos cloned by sessions live here.
-- **Workspace:** the default working directory for spawned sessions.
 
-Always mount a named volume (not a container-local directory) to preserve
-state across image rebuilds and container restarts. See
+The separately named workspace volume at `/workspace` holds repository
+checkouts and all in-progress working-tree changes. Both volumes are required
+to recover a session and its checkout after `docker compose up` recreates the
+container. Back them up and restore them as one unit; do not replace either
+volume during an upgrade without a recovery plan.
+
+Always mount named volumes (not container-local directories) to preserve state
+and workspaces across image rebuilds and container replacement. See
 [Backup and Restore](backup.md) for backup procedures.
 
 ## Security considerations
@@ -184,15 +191,30 @@ services:
 ## Stopping and restarting
 
 ```bash
-# Stop the agent (state volume persists)
+# Stop the agent (both named volumes persist)
 docker compose --file deploy/docker/docker-compose.yml down
 
 # Restart
 docker compose --file deploy/docker/docker-compose.yml up -d
 ```
 
-Named-channel sessions resume automatically on restart. Ephemeral sessions
-start fresh.
+Named-channel sessions and repository workspaces remain available after
+restart. Ephemeral sessions start fresh.
+
+## Docker restart verification
+
+The credential-free workspace persistence scenarios are intentionally not part
+of ordinary `npm test` runs, because they require a live Docker daemon and a
+locally built `buzz-agent-prime:dev` image. A Docker-enabled CI job (or an
+operator validating an image locally) runs them explicitly:
+
+```bash
+BUZZ_AGENT_PRIME_DOCKER_E2E=1 npm test -- \
+  test/e2e/container-restart.test.ts test/e2e/pod-restart.test.ts
+```
+
+With the opt-in set, missing Docker or the image is a test failure. Without
+it, the scenarios are reported as skipped and do not invoke the Docker CLI.
 
 ## Upgrading
 

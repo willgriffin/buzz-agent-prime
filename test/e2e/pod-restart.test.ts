@@ -4,23 +4,26 @@
  * Verifies that buzz-agent-prime survives a pod-style restart with
  * PVC-backed persistent storage:
  * 1. Simulate a Kubernetes pod with a PVC-mounted state directory
- * 2. Start buzz-agent-prime with the PVC volume
- * 3. Create a session and send a prompt
- * 4. "Kill" the pod (stop the container) and "reschedule" (restart)
- * 5. Verify state persistence and recovery
+ * 2. Create its workspace subPath before the application starts
+ * 3. Create and modify a credential-free local Git checkout
+ * 4. Delete the pod and reschedule with the same PVC and subPath
+ * 5. Verify the checkout remains intact
  *
  * Uses Docker volumes to simulate PVC behavior (single-replica with
  * persistent volume claim). In a real Kubernetes environment, this
  * maps to a pod deletion and rescheduling with the same PVC.
  *
- * Gated on Docker + container image availability — skips gracefully.
+ * Explicitly gated on BUZZ_AGENT_PRIME_DOCKER_E2E=1. This prevents ordinary
+ * test runs from probing Docker; an opted-in run fails if Docker or the image
+ * is unavailable.
  *
  * Acceptance criterion: "pod-style restart" scenario passes in CI.
  */
 
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   isDockerAvailable,
+  isDockerImageAvailable,
   removeContainer,
   createVolume,
   removeVolume,
@@ -31,130 +34,128 @@ import {
   execInContainer,
 } from "./helpers/container-harness.js";
 import { clearMockChildCache } from "../contract/helpers/mock-child.js";
-import { execFileSync } from "node:child_process";
 
-let dockerAvailable = false;
-let testPvcName = "";
+const testPvcName = uniqueContainerName("buzz-test-pvc");
 const testPodName = uniqueContainerName("buzz-test-pod");
+const rescheduledPodName = uniqueContainerName("buzz-test-pod-rescheduled");
+const workspaceInitializerName = uniqueContainerName("buzz-test-workspace-initializer");
 
-/**
- * Check if the buzz-agent-prime container image is available.
- */
-function getContainerImage(): string | null {
-  try {
-    execFileSync("docker", ["image", "inspect", "buzz-agent-prime:dev"], {
-      stdio: "pipe",
-      timeout: 5000,
-    });
-    return "buzz-agent-prime:dev";
-  } catch {
-    return null;
+const dockerE2eEnabled = process.env.BUZZ_AGENT_PRIME_DOCKER_E2E === "1";
+let dockerFixtureStarted = false;
+
+async function requireDockerImage(): Promise<string> {
+  if (!(await isDockerAvailable())) {
+    throw new Error("BUZZ_AGENT_PRIME_DOCKER_E2E=1 requires an available Docker daemon");
   }
+  const image = "buzz-agent-prime:dev";
+  if (!(await isDockerImageAvailable(image))) {
+    throw new Error("BUZZ_AGENT_PRIME_DOCKER_E2E=1 requires the buzz-agent-prime:dev image");
+  }
+  return image;
 }
 
-beforeAll(() => {
-  dockerAvailable = isDockerAvailable();
-  if (dockerAvailable) {
-    testPvcName = createVolume(`buzz-test-pvc-${Date.now()}`);
-  }
-});
-
-afterAll(() => {
-  if (dockerAvailable) {
-    removeContainer(testPodName);
-    if (testPvcName) removeVolume(testPvcName);
+afterAll(async () => {
+  if (dockerE2eEnabled && dockerFixtureStarted) {
+    await removeContainer(workspaceInitializerName);
+    await removeContainer(testPodName);
+    await removeContainer(rescheduledPodName);
+    await removeVolume(testPvcName);
   }
   clearMockChildCache();
 });
 
-describe("Pod-style restart recovery (PVC simulation)", () => {
-  it("simulates pod restart with PVC-backed state", { timeout: 30000 }, async () => {
-    const image = getContainerImage();
-    if (!dockerAvailable || !image) return;
+describe.skipIf(!dockerE2eEnabled)("Pod-style workspace persistence (PVC simulation)", () => {
+  it(
+    "retains a modified checkout across PVC-backed pod replacement",
+    { timeout: 30000 },
+    async () => {
+      const image = await requireDockerImage();
+      dockerFixtureStarted = true;
+      await createVolume(testPvcName);
 
-    // Start pod (container) with PVC volume
-    startContainer({
-      name: testPodName,
-      image,
-      env: { BUZZ_AGENT_PRIME_MAX_SESSIONS: "4" },
-      volumes: { [testPvcName]: "/var/lib/buzz-agent-prime" },
-    });
+      // Match the manifest initContainer: create the state-backed subPath before
+      // Docker (standing in for Kubernetes) mounts it at /workspace.
+      await startContainer({
+        name: workspaceInitializerName,
+        image,
+        volumes: { [testPvcName]: "/var/lib/buzz-agent-prime" },
+        entrypoint: "sh",
+        command: ["-ec", "mkdir -p /var/lib/buzz-agent-prime/workspace; exec tail -f /dev/null"],
+        readOnlyRootFilesystem: true,
+        tmpfs: ["/tmp:exec,size=64M"],
+      });
+      expect(await waitForContainerRunning(workspaceInitializerName)).toBe(true);
+      await removeContainer(workspaceInitializerName);
 
-    const running = await waitForContainerRunning(testPodName, 30000);
-    expect(running).toBe(true);
+      const stateBackedWorkspaceMounts = [
+        { source: testPvcName, target: "/var/lib/buzz-agent-prime" },
+        { source: testPvcName, target: "/workspace", subPath: "workspace" },
+      ];
+      await startContainer({
+        name: testPodName,
+        image,
+        mounts: stateBackedWorkspaceMounts,
+        entrypoint: "sh",
+        command: ["-ec", "exec tail -f /dev/null"],
+        readOnlyRootFilesystem: true,
+        tmpfs: ["/tmp:exec,size=64M"],
+      });
+      expect(await waitForContainerRunning(testPodName)).toBe(true);
+      expect(await execInContainer(testPodName, ["id", "-u"])).toBe("1001");
+      await execInContainer(testPodName, [
+        "sh",
+        "-ec",
+        [
+          "git init -q /workspace/fixture-repository",
+          "git -C /workspace/fixture-repository config user.name fixture",
+          "git -C /workspace/fixture-repository config user.email fixture@example.invalid",
+          "printf 'base revision\\n' > /workspace/fixture-repository/README.md",
+          "git -C /workspace/fixture-repository add README.md",
+          "git -C /workspace/fixture-repository commit -qm initial",
+          "printf 'replacement revision\\n' > /workspace/fixture-repository/README.md",
+        ].join("; "),
+      ]);
 
-    // Write state to PVC
-    execInContainer(testPodName, ["mkdir", "-p", "/var/lib/buzz-agent-prime/state"]);
-    execInContainer(testPodName, [
-      "sh",
-      "-c",
-      'echo "pod-session-state" > /var/lib/buzz-agent-prime/state/pvc-test',
-    ]);
-  });
+      await stopContainer(testPodName);
+      await removeContainer(testPodName);
+      await startContainer({
+        name: rescheduledPodName,
+        image,
+        mounts: stateBackedWorkspaceMounts,
+        entrypoint: "sh",
+        command: ["-ec", "exec tail -f /dev/null"],
+        readOnlyRootFilesystem: true,
+        tmpfs: ["/tmp:exec,size=64M"],
+      });
+      expect(await waitForContainerRunning(rescheduledPodName)).toBe(true);
+      expect(await execInContainer(rescheduledPodName, ["id", "-u"])).toBe("1001");
 
-  it("verifies PVC state persistence across pod rescheduling", { timeout: 30000 }, async () => {
-    const image = getContainerImage();
-    if (!dockerAvailable || !image) return;
-
-    // Kill pod (stop + remove container, simulating pod deletion)
-    stopContainer(testPodName);
-    removeContainer(testPodName);
-
-    // Reschedule: new container with same PVC
-    startContainer({
-      name: testPodName + "-rescheduled",
-      image,
-      env: { BUZZ_AGENT_PRIME_MAX_SESSIONS: "4" },
-      volumes: { [testPvcName]: "/var/lib/buzz-agent-prime" },
-    });
-
-    const running = await waitForContainerRunning(testPodName + "-rescheduled", 30000);
-    expect(running).toBe(true);
-
-    // Verify PVC state survived
-    const content = execInContainer(testPodName + "-rescheduled", [
-      "cat",
-      "/var/lib/buzz-agent-prime/state/pvc-test",
-    ]);
-    expect(content.trim()).toBe("pod-session-state");
-  });
-});
-
-/**
- * Pod-style restart recovery scenario — definition for CI.
- */
-describe("Pod-style restart recovery — CI scenario definition", () => {
-  it("documents the pod-style restart scenario for CI", () => {
-    const scenario = {
-      name: "pod-style restart",
-      kubernetes_equivalent: "pod deletion + rescheduling with PVC",
-      prerequisites: [
-        "Docker available",
-        "buzz-agent-prime container image built (issue #5/#7)",
-        "acp command implemented (issue #3)",
-        "Kubernetes deployment manifests available (issue #7)",
-      ],
-      steps: [
-        "create PVC volume (docker volume)",
-        "start pod (container) with PVC mounted",
-        "initialize ACP session and send prompt",
-        "record session state and PVC contents",
-        "kill pod (stop + remove container)",
-        "reschedule: new container with same PVC",
-        "verify PVC state intact",
-        "verify ACP session recovery",
-        "verify new sessions work",
-      ],
-      passes_if: [
-        "PVC state directory contents survive pod restart",
-        "agent process starts cleanly on rescheduled pod",
-        "previous session state is recoverable from PVC",
-        "new ACP sessions can be created",
-      ],
-    };
-    expect(scenario.name).toBe("pod-style restart");
-    expect(scenario.steps).toHaveLength(9);
-  });
+      expect(
+        await execInContainer(rescheduledPodName, [
+          "git",
+          "-C",
+          "/workspace/fixture-repository",
+          "rev-parse",
+          "--is-inside-work-tree",
+        ]),
+      ).toBe("true");
+      expect(
+        await execInContainer(rescheduledPodName, [
+          "cat",
+          "/workspace/fixture-repository/README.md",
+        ]),
+      ).toBe("replacement revision");
+      expect(
+        await execInContainer(rescheduledPodName, [
+          "git",
+          "-C",
+          "/workspace/fixture-repository",
+          "status",
+          "--short",
+        ]),
+      ).toBe(" M README.md");
+    },
+  );
 });
 
 /**

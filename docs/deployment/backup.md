@@ -1,18 +1,21 @@
 # Backup and Restore
 
-The state directory (`/var/lib/buzz-agent-prime`, configured via
-`BUZZ_AGENT_PRIME_STATE_DIR`) holds all persistent runtime state. This guide
-covers backup and restore procedures for Docker and Kubernetes.
+Persistent runtime storage differs slightly by target. Docker and Compose use
+two named volumes: `buzz-agent-prime-state` at `/var/lib/buzz-agent-prime` and
+`buzz-agent-prime-workspace` at `/workspace`. Kubernetes stores both on the
+StatefulSet PVC, mounting the PVC's `workspace` subpath at `/workspace`. This
+guide covers consistent backup and restore procedures for both layouts.
 
 ## What is in the state directory
 
 ```text
 /var/lib/buzz-agent-prime/
-  workspace/       # Default working directory for sessions
   tmp/             # Writable scratch space (not critical for backups)
   sessions/        # Named-channel session state and kernel checkpoints
   artifacts/       # Generated files and outputs
   repos/           # Git checkouts managed by sessions
+
+/workspace/        # Repository checkouts and working-tree changes
 ```
 
 ### What to back up
@@ -22,7 +25,7 @@ covers backup and restore procedures for Docker and Kubernetes.
 | `sessions/`  | **Yes**   | Named-channel checkpoints; required to resume.       |
 | `repos/`     | **Yes**   | Local clones with work-in-progress; slow to rebuild. |
 | `artifacts/` | Optional  | Regeneratable, but may hold valuable outputs.        |
-| `workspace/` | Optional  | Working files; sessions can recreate as needed.      |
+| `/workspace` | **Yes**   | Repository checkouts and in-progress working trees.  |
 | `tmp/`       | No        | Scratch space; safe to exclude from backups.         |
 
 ### Named-channel vs. ephemeral sessions
@@ -41,12 +44,13 @@ covers backup and restore procedures for Docker and Kubernetes.
 # Stop the agent to ensure consistent state
 docker compose --file deploy/docker/docker-compose.yml down
 
-# Copy the state directory out of the volume
+# Archive both persistent volumes from the same stopped point in time.
 docker run --rm \
-  -v buzz-agent-prime-state:/state \
+  -v buzz-agent-prime-state:/state:ro \
+  -v buzz-agent-prime-workspace:/workspace:ro \
   -v "$(pwd)/backup":/backup \
-  alpine tar czf /backup/buzz-agent-prime-state-$(date +%Y%m%d).tar.gz \
-  -C /state .
+  alpine sh -ec 'tar czf /backup/buzz-agent-prime-state-$(date +%Y%m%d).tar.gz -C /state .
+                 tar czf /backup/buzz-agent-prime-workspace-$(date +%Y%m%d).tar.gz -C /workspace .'
 
 # Restart the agent
 docker compose --file deploy/docker/docker-compose.yml up -d
@@ -65,9 +69,10 @@ zfs snapshot tank/docker/buzz-agent-prime-state@$(date +%Y%m%d)
 ### Option C: `restic` (recommended for automated backups)
 
 ```bash
-restic -r /backup/buzz-agent-prime backup \
-  --tag docker \
+restic -r /backup/buzz-agent-prime backup --tag docker-state \
   /var/lib/docker/volumes/buzz-agent-prime-state/_data
+restic -r /backup/buzz-agent-prime backup --tag docker-workspace \
+  /var/lib/docker/volumes/buzz-agent-prime-workspace/_data
 ```
 
 ## Docker restore
@@ -76,15 +81,18 @@ restic -r /backup/buzz-agent-prime backup \
 # Stop the agent
 docker compose --file deploy/docker/docker-compose.yml down
 
-# Remove the existing volume (WARNING: destroys current state)
-docker volume rm buzz-agent-prime-state
+# Remove the existing volumes (WARNING: destroys current state and checkouts)
+docker volume rm buzz-agent-prime-state buzz-agent-prime-workspace
 
-# Create a fresh volume and restore into it
+# Create fresh volumes and restore both archives from the same backup point.
 docker volume create buzz-agent-prime-state
+docker volume create buzz-agent-prime-workspace
 docker run --rm \
   -v buzz-agent-prime-state:/state \
+  -v buzz-agent-prime-workspace:/workspace \
   -v "$(pwd)/backup":/backup \
-  alpine tar xzf /backup/buzz-agent-prime-state-20250108.tar.gz -C /state
+  alpine sh -ec 'tar xzf /backup/buzz-agent-prime-state-20250108.tar.gz -C /state
+                 tar xzf /backup/buzz-agent-prime-workspace-20250108.tar.gz -C /workspace'
 
 # Restart
 docker compose --file deploy/docker/docker-compose.yml up -d
@@ -95,38 +103,32 @@ docker compose --file deploy/docker/docker-compose.yml up -d
 ### Option A: `kubectl cp` (ad hoc)
 
 ```bash
-# Scale down the StatefulSet
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=0
+# Scale down the StatefulSet so state and its workspace subpath are consistent.
+kubectl scale statefulset buzz-agent-prime -n buzz-agents --replicas=0
 
-# Wait for the pod to terminate
-kubectl wait --for=delete pod -l app=buzz-agent-prime -n buzz-agent-prime --timeout=60s
-
-# Copy state out of the PVC
-kubectl run -n buzz-agent-prime backup-helper --rm -i \
-  --image=alpine --restart=Never \
+# Run a temporary helper against the StatefulSet PVC and copy the complete
+# state directory. It includes `workspace`, which backs `/workspace`.
+kubectl run -n buzz-agents backup-helper --restart=Never --image=alpine \
   --overrides='{
     "spec": {
       "containers": [{
         "name": "backup-helper",
         "image": "alpine",
-        "command": ["tar", "czf", "/backup/state.tar.gz", "-C", "/state", "."],
-        "volumeMounts": [{
-          "name": "state",
-          "mountPath": "/state"
-        }]
+        "command": ["sleep", "3600"],
+        "volumeMounts": [{"name": "state", "mountPath": "/state", "readOnly": true}]
       }],
       "volumes": [{
         "name": "state",
-        "persistentVolumeClaim": {
-          "claimName": "buzz-agent-prime-state-0"
-        }
+        "persistentVolumeClaim": {"claimName": "buzz-agent-prime-state-buzz-agent-prime-0"}
       }]
     }
-  }' \
-  --restart=Never
+  }'
+kubectl wait -n buzz-agents --for=condition=Ready pod/backup-helper --timeout=60s
+kubectl cp -n buzz-agents backup-helper:/state ./backup/buzz-agent-prime-state-$(date +%Y%m%d)
 
 # Scale back up
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=1
+kubectl delete pod -n buzz-agents backup-helper --ignore-not-found
+kubectl scale statefulset buzz-agent-prime -n buzz-agents --replicas=1
 ```
 
 ### Option B: Volume snapshots
@@ -139,18 +141,18 @@ apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
   name: buzz-agent-prime-state-snapshot-20250108
-  namespace: buzz-agent-prime
+  namespace: buzz-agents
 spec:
   volumeSnapshotClassName: csi-snapshot-class
   source:
-    persistentVolumeClaimName: buzz-agent-prime-state-0
+    persistentVolumeClaimName: buzz-agent-prime-state-buzz-agent-prime-0
 ```
 
 ```bash
 kubectl apply -f snapshot.yaml
 
 # Check status
-kubectl get volumesnapshot -n buzz-agent-prime
+kubectl get volumesnapshot -n buzz-agents
 ```
 
 ### Option C: Restic via CronJob
@@ -164,7 +166,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: buzz-agent-prime-backup
-  namespace: buzz-agent-prime
+  namespace: buzz-agents
 spec:
   schedule: "0 2 * * *" # Daily at 2 AM
   jobTemplate:
@@ -191,74 +193,37 @@ spec:
           volumes:
             - name: state
               persistentVolumeClaim:
-                claimName: buzz-agent-prime-state-0
+                claimName: buzz-agent-prime-state-buzz-agent-prime-0
 ```
 
 ## Kubernetes restore
 
-### From a volume snapshot
+The StatefulSet claim-template name is immutable. Restore the contents into
+the original ordinal PVC (`buzz-agent-prime-state-buzz-agent-prime-0` for the
+base) while the StatefulSet is scaled down; do not patch the template name.
+Restore the complete PVC, including its `workspace` directory, from the same
+snapshot or archive used for the backup.
 
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: buzz-agent-prime-state-restored
-  namespace: buzz-agent-prime
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 10Gi
-  dataSource:
-    name: buzz-agent-prime-state-snapshot-20250108
-    kind: VolumeSnapshot
-    apiGroup: snapshot.storage.k8s.io
-```
-
-```bash
-# Scale down
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=0
-
-# Create the restored PVC
-kubectl apply -f restored-pvc.yaml
-
-# Update the StatefulSet to use the restored PVC (or swap via patch)
-kubectl patch statefulset buzz-agent-prime -n buzz-agent-prime \
-  --type=json -p='[{"op":"replace","path":"/spec/volumeClaimTemplates/0/metadata/name","value":"state-restored"}]'
-
-# Scale back up
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=1
-```
-
-### From a restic backup
-
-```bash
-# Scale down
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=0
-
-# Run a restore pod
-kubectl run -n buzz-agent-prime restic-restore --rm -i \
-  --image=restic/restic:latest --restart=Never \
-  --overrides='{... volumeMounts, restic restore command ...}' \
-  -- restic -r s3:... restore latest --target /state
-
-# Scale back up
-kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=1
-```
+If a storage system requires a new PVC for snapshot restore, treat the switch
+as a deliberate StatefulSet migration in a cluster-specific change. Do not
+make that migration in the reusable base manifest: it must preserve the
+existing PVC identity and verify both `/var/lib/buzz-agent-prime` and
+`/workspace` before the workload is scaled back up.
 
 ## Backup verification
 
-After restoring, always verify the state is intact:
+After restoring, always verify state and the workspace checkout are intact:
 
 ```bash
 # Docker
 docker exec -it buzz-agent-prime buzz-agent-prime doctor
 docker logs buzz-agent-prime 2>&1 | head -20
 
-# Kubernetes
-kubectl exec -n buzz-agent-prime deployment/buzz-agent-prime -- buzz-agent-prime doctor
-kubectl logs -n buzz-agent-prime deployment/buzz-agent-prime --tail=20
+# Kubernetes (the example overlay shown here)
+kubectl exec -n buzz-agents statefulset/buzz-agent-prime-example -- buzz-agent-prime doctor
+kubectl logs -n buzz-agents statefulset/buzz-agent-prime-example --tail=20
 ```
 
-Then send a message to a previously-persisted named channel and confirm the
-agent recalls prior session context.
+Then send a message to a previously-persisted named channel and verify that a
+repository checkout under `/workspace` still has its expected working-tree
+contents.
