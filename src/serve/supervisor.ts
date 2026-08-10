@@ -109,9 +109,14 @@ export class Supervisor extends EventEmitter {
       }
 
       this.signalProcessTree(child, "SIGKILL");
-      // Reap the direct child and wait for the group to disappear so callers
-      // cannot observe a briefly surviving descendant after shutdown resolves.
-      await Promise.all([this.waitForExit(child), this.waitForProcessGroupExit(child.pid!)]);
+      // Reap the direct child and give the group one bounded post-kill window
+      // to disappear before returning, even if an unreapable zombie remains.
+      // A second bounded window avoids hanging forever if a killed process
+      // remains as an unreapable zombie under another parent.
+      await Promise.all([
+        this.waitForExit(child),
+        this.waitForProcessGroupExit(child.pid!, this.shutdownTimeoutMs),
+      ]);
       return;
     }
 
@@ -158,17 +163,13 @@ export class Supervisor extends EventEmitter {
     return false;
   }
 
-  /** Wait until a POSIX process group no longer exists, optionally up to a grace period. */
-  private async waitForProcessGroupExit(pid: number, timeoutMs?: number): Promise<boolean> {
-    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+  /** Wait until a POSIX process group no longer exists, up to a grace period. */
+  private async waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
     while (this.isProcessGroupAlive(pid)) {
-      if (deadline === undefined) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 25));
-      } else {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) return false;
-        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(remaining, 25)));
-      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(remaining, 25)));
     }
     return true;
   }

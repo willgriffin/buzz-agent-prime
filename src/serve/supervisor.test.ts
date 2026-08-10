@@ -43,9 +43,10 @@ function killProcessGroup(pid: number): void {
 
 function startTermIgnoringTree(descendantReadyFile: string, parentIgnoresTerm = false): string[] {
   const descendant = [
-    'import { writeFileSync } from "node:fs";',
+    'import { renameSync, writeFileSync } from "node:fs";',
     'process.on("SIGTERM", () => {});',
-    `writeFileSync(${JSON.stringify(descendantReadyFile)}, String(process.pid));`,
+    `writeFileSync(${JSON.stringify(`${descendantReadyFile}.tmp`)}, String(process.pid));`,
+    `renameSync(${JSON.stringify(`${descendantReadyFile}.tmp`)}, ${JSON.stringify(descendantReadyFile)});`,
     "setInterval(() => {}, 1_000);",
   ].join("\n");
   const parent = [
