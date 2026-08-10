@@ -109,7 +109,9 @@ export class Supervisor extends EventEmitter {
       }
 
       this.signalProcessTree(child, "SIGKILL");
-      await this.waitForExit(child);
+      // Reap the direct child and wait for the group to disappear so callers
+      // cannot observe a briefly surviving descendant after shutdown resolves.
+      await Promise.all([this.waitForExit(child), this.waitForProcessGroupExit(child.pid!)]);
       return;
     }
 
@@ -156,13 +158,17 @@ export class Supervisor extends EventEmitter {
     return false;
   }
 
-  /** Wait until a POSIX process group no longer exists, up to its grace period. */
-  private async waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
+  /** Wait until a POSIX process group no longer exists, optionally up to a grace period. */
+  private async waitForProcessGroupExit(pid: number, timeoutMs?: number): Promise<boolean> {
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
     while (this.isProcessGroupAlive(pid)) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) return false;
-      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(remaining, 25)));
+      if (deadline === undefined) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      } else {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return false;
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(remaining, 25)));
+      }
     }
     return true;
   }

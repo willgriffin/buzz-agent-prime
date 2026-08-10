@@ -41,14 +41,17 @@ function killProcessGroup(pid: number): void {
   }
 }
 
-function startTermIgnoringTree(pidFile: string, parentIgnoresTerm = false): string[] {
-  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+function startTermIgnoringTree(descendantReadyFile: string, parentIgnoresTerm = false): string[] {
+  const descendant = [
+    'import { writeFileSync } from "node:fs";',
+    'process.on("SIGTERM", () => {});',
+    `writeFileSync(${JSON.stringify(descendantReadyFile)}, String(process.pid));`,
+    "setInterval(() => {}, 1_000);",
+  ].join("\n");
   const parent = [
     'import { spawn } from "node:child_process";',
-    'import { writeFileSync } from "node:fs";',
     `const descendant = spawn(process.execPath, ["--eval", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
     "if (descendant.pid === undefined) process.exit(1);",
-    `writeFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));`,
     parentIgnoresTerm ? 'process.on("SIGTERM", () => {});' : "",
     "setInterval(() => {}, 1_000);",
   ].join("\n");
@@ -78,6 +81,7 @@ describePosix("Supervisor shutdown", () => {
       const startedAt = Date.now();
       await supervisor.shutdown();
 
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(80);
       expect(Date.now() - startedAt).toBeLessThan(1_000);
       expect(isAlive(childPid!)).toBe(false);
       expect(isAlive(descendantPid)).toBe(false);
