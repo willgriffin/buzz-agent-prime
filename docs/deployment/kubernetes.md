@@ -1,259 +1,144 @@
 # Kubernetes Deployment
 
-This guide deploys `buzz-agent-prime` as a single-replica StatefulSet on
-Kubernetes. It is designed for operators who need persistent state, rolling
-updates, and integration with cluster secrets management.
+`buzz-agent-prime` runs as a one-replica StatefulSet in the `buzz-agents`
+namespace. Its `state` volume claim template provides the persistent state
+needed to recover named Prime sessions after a pod replacement. Do not scale
+this deployment above one replica in v0.1.
 
 ## Prerequisites
 
-- **Kubernetes 1.28+** cluster with `kubectl` configured.
-- A **Buzz Nostr identity** (nsec or hex). See [Identity Setup](identity.md).
-- One or more **model provider API keys**. See [Provider Configuration](providers.md).
-- A **StorageClass** with persistent volume support (for state).
-- A reachable **Buzz relay** (default: `wss://buzz.happyvertical.com`).
+- Kubernetes 1.28+ and `kubectl` with access to the target cluster.
+- A default StorageClass (or an overlay that supplies one) supporting
+  `ReadWriteOnce` PVCs.
+- A Buzz Nostr private key and at least one model-provider API key. See
+  [Identity Setup](identity.md) and [Provider Configuration](providers.md).
 
-## Architecture: single-replica StatefulSet
+The manifests create no credentials and request no Kubernetes RBAC. The pod
+runs non-root with a read-only root filesystem, no privilege escalation, all
+Linux capabilities dropped, a RuntimeDefault seccomp profile, resource
+requests/limits, and a 30-second termination grace period.
 
-`buzz-agent-prime` v0.1 is designed for **single-replica deployments only**.
-The multiplexer cannot coordinate between multiple replicas, and the state
-directory is not shared. Kubernetes manifests use a `StatefulSet` with
-`replicas: 1` to ensure:
+## Render the manifests
 
-- A stable pod identity and persistent volume.
-- No concurrent replicas running against the same state.
-- Ordered startup and shutdown.
-
-Do not scale `replicas` above 1 in v0.1.
-
-## Quick start
-
-### 1. Create secrets
+Always render before applying. Both the reusable base and the sample overlay
+must render successfully:
 
 ```bash
-kubectl create secret generic buzz-agent-secrets \
-  --from-literal=BUZZ_PRIVATE_KEY=nsec1yourkeyhere… \
-  --from-literal=ANTHROPIC_API_KEY=sk-ant-api03-…
+kubectl kustomize deploy/kubernetes/base
+kubectl kustomize deploy/kubernetes/overlays/example
 ```
 
-For production, use
-[ExternalSecrets](https://external-secrets.io/) or
-[Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) — see
-[Provider Configuration](providers.md).
+The example overlay adds an `-example` suffix to the StatefulSet, Service, and
+NetworkPolicy, while retaining the externally provisioned
+`buzz-agent-prime-secrets` reference. It deliberately contains no Secret or
+secret generator.
 
-### 2. Apply manifests
+## Create the external Secret
 
-The manifests live under `deploy/kubernetes/` (maintained by the Kubernetes
-worker, issue #7):
+Create the exact stable Secret name before applying either kustomization. Do
+not commit the command with real values or create an empty Secret in the base.
 
 ```bash
-# Kustomize
-kubectl apply -k deploy/kubernetes/
-
-# Or apply individual manifests:
-kubectl apply -f deploy/kubernetes/namespace.yaml
-kubectl apply -f deploy/kubernetes/secret.yaml
-kubectl apply -f deploy/kubernetes/configmap.yaml
-kubectl apply -f deploy/kubernetes/statefulset.yaml
-kubectl apply -f deploy/kubernetes/service.yaml
+kubectl -n buzz-agents create secret generic buzz-agent-prime-secrets \
+  --from-literal=BUZZ_PRIVATE_KEY='nsec1replace-with-your-key' \
+  --from-literal=ANTHROPIC_API_KEY='replace-with-your-provider-key'
 ```
 
-### 3. Verify
+Use `OPENAI_API_KEY` or another supported provider key in place of
+`ANTHROPIC_API_KEY` when appropriate. The StatefulSet imports the Secret with
+`envFrom`; its name does not receive a Kustomize hash.
 
-```bash
-# Check pod status
-kubectl get pods -n buzz-agent-prime
-
-# Run diagnostics
-kubectl exec -n buzz-agent-prime deployment/buzz-agent-prime -- buzz-agent-prime doctor
-
-# Check logs
-kubectl logs -n buzz-agent-prime deployment/buzz-agent-prime --tail=30
-
-# Check the persistent volume
-kubectl get pvc -n buzz-agent-prime
-```
-
-## Expected manifest structure
-
-> The actual manifest files are maintained by the Kubernetes worker (issue
-> #7). This section documents the expected structure so operators know what to
-> look for and how to customize.
-
-### StatefulSet
+For production, provision that same Secret name with your secrets manager.
+For example, an External Secrets Operator resource can target the required
+name without placing credentials in Git:
 
 ```yaml
-# Structurally similar to deploy/kubernetes/statefulset.yaml
-apiVersion: apps/v1
-kind: StatefulSet
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
-  name: buzz-agent-prime
-  namespace: buzz-agent-prime
+  name: buzz-agent-prime-secrets
+  namespace: buzz-agents
 spec:
-  replicas: 1 # Do not scale above 1 in v0.1
-  serviceName: buzz-agent-prime
-  selector:
-    matchLabels:
-      app: buzz-agent-prime
-  template:
-    metadata:
-      labels:
-        app: buzz-agent-prime
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
-      containers:
-        - name: buzz-agent-prime
-          image: ghcr.io/willgriffin/buzz-agent-prime:0.1.0
-          ports:
-            - containerPort: 3000
-              name: http
-          envFrom:
-            - configMapRef:
-                name: buzz-agent-config
-          env:
-            - name: BUZZ_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: buzz-agent-secrets
-                  key: BUZZ_PRIVATE_KEY
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: buzz-agent-secrets
-                  key: ANTHROPIC_API_KEY
-          volumeMounts:
-            - name: state
-              mountPath: /var/lib/buzz-agent-prime
-            - name: tmp
-              mountPath: /tmp
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-          readinessProbe:
-            exec:
-              command: ["buzz-agent-prime", "doctor"]
-            initialDelaySeconds: 10
-            periodSeconds: 30
-          livenessProbe:
-            exec:
-              command: ["buzz-agent-prime", "doctor"]
-            initialDelaySeconds: 30
-            periodSeconds: 60
-  volumeClaimTemplates:
-    - metadata:
-        name: state
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 10Gi
+  secretStoreRef:
+    name: production-secrets
+    kind: ClusterSecretStore
+  target:
+    name: buzz-agent-prime-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: BUZZ_PRIVATE_KEY
+      remoteRef:
+        key: buzz-agent-prime/private-key
+    - secretKey: ANTHROPIC_API_KEY
+      remoteRef:
+        key: buzz-agent-prime/anthropic-api-key
 ```
 
-### PersistentVolumeClaim
-
-State is backed by a `volumeClaimTemplate` in the StatefulSet. The PVC is
-named `<statefulset-name>-state-<ordinal>` (e.g.
-`buzz-agent-prime-state-0`) and persists across pod restarts and image
-updates.
-
-## Configuration
-
-All configuration is environment-based — see
-[contracts](../contracts.md) for the full list.
-
-### ConfigMap
-
-Non-secret configuration goes in a `ConfigMap`:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: buzz-agent-config
-  namespace: buzz-agent-prime
-data:
-  BUZZ_RELAY_URL: "wss://buzz.happyvertical.com"
-  BUZZ_ACP_RESPOND_TO: "owner-only"
-  BUZZ_AGENT_PRIME_MAX_SESSIONS: "4"
-  BUZZ_AGENT_PRIME_STATE_DIR: "/var/lib/buzz-agent-prime"
-```
-
-### Secrets
-
-Secret values (`BUZZ_PRIVATE_KEY`, API keys) go in `Secret` resources and
-are referenced via `secretKeyRef`. Never put secret values in a `ConfigMap`.
-
-## PVC backup and restore
-
-The PVC at `/var/lib/buzz-agent-prime` holds named-channel session state,
-kernel checkpoints, artifacts, and repository checkouts. Back it up
-regularly. See [Backup and Restore](backup.md) for procedures using
-`kubectl cp`, volume snapshots, and restic.
-
-## Rolling updates
-
-Kubernetes StatefulSets support rolling updates by default. When you change
-the image tag, Kubernetes updates the single pod after the new image is pulled:
+Wait for the resulting Secret before applying the workload:
 
 ```bash
-kubectl set image statefulset/buzz-agent-prime \
-  buzz-agent-prime=ghcr.io/willgriffin/buzz-agent-prime:0.1.1 \
-  -n buzz-agent-prime
+kubectl -n buzz-agents wait --for=create secret/buzz-agent-prime-secrets \
+  --timeout=120s
 ```
 
-The PVC persists across the update. Named-channel sessions resume on the new
-image.
+## Apply and verify
 
-See [Upgrade and Rollback](upgrade.md) for safe upgrade and rollback
-procedures.
+Choose one target. The example is useful for a non-production installation;
+the base keeps the canonical `buzz-agent-prime` resource names.
 
-## Security hardening
-
-**The agent and its subagents execute with the container user's permissions.
-`buzz-agent-prime` is not a security sandbox.**
-
-Apply these security contexts:
-
-| Setting                    | Value     | Purpose                      |
-| -------------------------- | --------- | ---------------------------- |
-| `runAsNonRoot`             | `true`    | Disallow running as root.    |
-| `runAsUser`                | `1000`    | Non-root UID.                |
-| `fsGroup`                  | `1000`    | Volume ownership.            |
-| `readOnlyRootFilesystem`   | `true`    | Immutability of rootfs.      |
-| `allowPrivilegeEscalation` | `false`   | No `setuid` escalation.      |
-| `capabilities.drop`        | `["ALL"]` | Drop all Linux capabilities. |
-
-Additional recommendations:
-
-- Do not grant the service account `cluster-admin` or broad RBAC
-  permissions. The agent does not need to access the Kubernetes API in v0.1.
-- Use a dedicated namespace (`buzz-agent-prime`) to limit blast radius.
-- Set resource requests and limits:
-
-```yaml
-resources:
-  requests:
-    cpu: "500m"
-    memory: 1Gi
-  limits:
-    cpu: "2"
-    memory: 4Gi
+```bash
+kubectl apply -k deploy/kubernetes/overlays/example
+kubectl -n buzz-agents rollout status statefulset/buzz-agent-prime-example
+kubectl -n buzz-agents exec statefulset/buzz-agent-prime-example -- \
+  buzz-agent-prime doctor
 ```
 
-## Scaling
+The external Secret must contain `BUZZ_PRIVATE_KEY`; `doctor` checks that
+configuration without printing secret values. Inspect the workload and storage
+without exposing credentials:
 
-v0.1 does not support horizontal scaling. Ensure `replicas: 1`. The
-multiplexer's session routing and state directory are inherently single-node.
+```bash
+kubectl -n buzz-agents get statefulset,pod,pvc
+kubectl -n buzz-agents describe pod buzz-agent-prime-example-0
+```
 
-Scaling to multiple replicas would cause:
+The rendered template mounts `state` directly, so the ordinal pod receives the
+StatefulSet-generated PVC `state-buzz-agent-prime-example-0` (the base uses
+`state-buzz-agent-prime-0`). There is no static PVC named
+`buzz-agent-prime-state`.
 
-- Duplicate relay connections under the same identity.
-- Conflicting session routing.
-- State directory races on a shared volume.
+## Pod-replacement/PVC identity evidence
 
-Multi-replica support is a non-goal for v0.1.
+The manifest test checks the deterministic relationship between the `state`
+mount, the `state` claim template, and the resulting ordinal PVC name. A live
+cluster recovery test remains gated by issue #11. When that environment is
+available, collect this evidence after creating a named Prime session:
+
+```bash
+kubectl -n buzz-agents get pod buzz-agent-prime-example-0 \
+  -o jsonpath='{.spec.volumes[?(@.name=="state")].persistentVolumeClaim.claimName}{"\\n"}'
+kubectl -n buzz-agents get pvc state-buzz-agent-prime-example-0 \
+  -o jsonpath='{.metadata.uid}{"\\n"}'
+kubectl -n buzz-agents delete pod buzz-agent-prime-example-0
+kubectl -n buzz-agents rollout status statefulset/buzz-agent-prime-example
+kubectl -n buzz-agents get pvc state-buzz-agent-prime-example-0 \
+  -o jsonpath='{.metadata.uid}{"\\n"}'
+kubectl -n buzz-agents exec statefulset/buzz-agent-prime-example -- \
+  buzz-agent-prime doctor
+```
+
+The two PVC UIDs must match. Then reconnect through Buzz and verify the named
+Prime session created before replacement is available. A recreated pod alone
+is not sufficient proof of session recovery.
+
+## Operations
+
+- Back up the PVC-mounted `/var/lib/buzz-agent-prime` directory; see
+  [Backup and Restore](backup.md).
+- Update the image with `kubectl set image statefulset/buzz-agent-prime ...`;
+  StatefulSet replacement retains the ordinal PVC.
+- The NetworkPolicy allows DNS plus HTTPS/SSH egress needed for the relay,
+  providers, Git, and GHCR. Tighten it to your network addresses where
+  possible.
+- The agent does not need a service-account token or Role/RoleBinding. Do not
+  add broad Kubernetes API permissions for this workload.

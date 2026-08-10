@@ -84,7 +84,9 @@ spec:
 
   volumeClaimTemplates:
     - metadata:
-        name: buzz-agent-prime-state
+        # StatefulSets resolve this template by volume name. Kubernetes creates
+        # state-buzz-agent-prime-0 for the first (and only supported) pod.
+        name: state
       spec:
         accessModes:
           - ReadWriteOnce
