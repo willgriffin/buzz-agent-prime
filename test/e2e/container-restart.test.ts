@@ -141,9 +141,19 @@ describe.skipIf(!dockerE2eEnabled)("Container workspace persistence", () => {
         "git",
         "-C",
         "/workspace/fixture-repository",
-        "status",
-        "--short",
+        "diff",
+        "--name-only",
       ]),
-    ).toBe(" M README.md\n?? untracked.txt");
+    ).toBe("README.md");
+    expect(
+      await execInContainer(replacementContainerName, [
+        "git",
+        "-C",
+        "/workspace/fixture-repository",
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+      ]),
+    ).toBe("untracked.txt");
   });
 });

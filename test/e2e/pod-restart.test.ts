@@ -150,10 +150,10 @@ describe.skipIf(!dockerE2eEnabled)("Pod-style workspace persistence (PVC simulat
           "git",
           "-C",
           "/workspace/fixture-repository",
-          "status",
-          "--short",
+          "diff",
+          "--name-only",
         ]),
-      ).toBe(" M README.md");
+      ).toBe("README.md");
     },
   );
 });

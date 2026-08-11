@@ -16,7 +16,7 @@ rollbacks revert to a previous known-good image.
 docker exec buzz-agent-prime buzz-agent-prime version
 
 # Kubernetes
-kubectl exec deployment/buzz-agent-prime -- buzz-agent-prime version
+kubectl exec -n buzz-agents statefulset/buzz-agent-prime -- buzz-agent-prime version
 ```
 
 4. **Check for breaking changes.** Contract changes (commands, environment
@@ -97,21 +97,26 @@ version wrote state that is incompatible with the older version:
 
 ## Kubernetes upgrade
 
-### Rolling update (zero-downtime for single replica)
+### Rolling update (brief downtime for single replica)
 
 Kubernetes StatefulSets perform rolling updates when the image changes. Since
 v0.1 runs a single replica, the update terminates the old pod and starts a
 new one — there is a brief downtime.
 
 ```bash
-# Set the new image tag
+# Set both pod containers to the new image tag
 kubectl set image statefulset/buzz-agent-prime \
-  buzz-agent-prime=ghcr.io/willgriffin/buzz-agent-prime:0.1.1 \
-  -n buzz-agent-prime
+  agent=ghcr.io/willgriffin/buzz-agent-prime:0.1.1 \
+  initialize-workspace=ghcr.io/willgriffin/buzz-agent-prime:0.1.1 \
+  -n buzz-agents
 
 # Watch the rollout
-kubectl rollout status statefulset/buzz-agent-prime -n buzz-agent-prime
+kubectl rollout status statefulset/buzz-agent-prime -n buzz-agents
 ```
+
+The `agent` and `initialize-workspace` containers intentionally reuse the same
+image. Update both in one command so workspace initialization and the running
+agent always come from the same release.
 
 The PVC persists across the rollout. Named-channel sessions resume
 automatically on the new pod.
@@ -120,14 +125,14 @@ automatically on the new pod.
 
 ```bash
 # Confirm the new version
-kubectl exec -n buzz-agent-prime deployment/buzz-agent-prime -- buzz-agent-prime version
+kubectl exec -n buzz-agents statefulset/buzz-agent-prime -- buzz-agent-prime version
 
 # Run diagnostics
-kubectl exec -n buzz-agent-prime deployment/buzz-agent-prime -- buzz-agent-prime doctor
+kubectl exec -n buzz-agents statefulset/buzz-agent-prime -- buzz-agent-prime doctor
 
 # Check pod status and logs
-kubectl get pods -n buzz-agent-prime
-kubectl logs -n buzz-agent-prime deployment/buzz-agent-prime --tail=30
+kubectl get pods -n buzz-agents
+kubectl logs -n buzz-agents statefulset/buzz-agent-prime --tail=30
 ```
 
 ## Kubernetes rollback
@@ -138,10 +143,10 @@ If the updated pod fails to start or pass health checks:
 
 ```bash
 # Immediately roll back to the previous revision
-kubectl rollout undo statefulset/buzz-agent-prime -n buzz-agent-prime
+kubectl rollout undo statefulset/buzz-agent-prime -n buzz-agents
 
 # Watch the rollback
-kubectl rollout status statefulset/buzz-agent-prime -n buzz-agent-prime
+kubectl rollout status statefulset/buzz-agent-prime -n buzz-agents
 ```
 
 ### Pinning a specific image
@@ -150,8 +155,9 @@ For explicit control, set the image tag back to the known-good version:
 
 ```bash
 kubectl set image statefulset/buzz-agent-prime \
-  buzz-agent-prime=ghcr.io/willgriffin/buzz-agent-prime:0.1.0 \
-  -n buzz-agent-prime
+  agent=ghcr.io/willgriffin/buzz-agent-prime:0.1.0 \
+  initialize-workspace=ghcr.io/willgriffin/buzz-agent-prime:0.1.0 \
+  -n buzz-agents
 ```
 
 ### State downgrades
@@ -159,10 +165,10 @@ kubectl set image statefulset/buzz-agent-prime \
 Kubernetes rollbacks revert the image but **not** the PVC. If the newer
 version wrote incompatible state:
 
-1. Scale down: `kubectl scale statefulset/buzz-agent-prime -n buzz-agent-prime --replicas=0`
+1. Scale down: `kubectl scale statefulset/buzz-agent-prime -n buzz-agents --replicas=0`
 2. Restore the PVC from the pre-upgrade snapshot or backup. See
    [Backup and Restore](backup.md).
-3. Scale back up: `kubectl scale statefulset buzz-agent-prime -n buzz-agent-prime --replicas=1`
+3. Scale back up: `kubectl scale statefulset buzz-agent-prime -n buzz-agents --replicas=1`
 
 ## Upgrade compatibility matrix
 
