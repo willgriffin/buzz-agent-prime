@@ -3,11 +3,15 @@ kind: Kustomization
 
 namespace: buzz-agents
 
-commonLabels:
-  app.kubernetes.io/name: buzz-agent-prime
+labels:
+  - pairs:
+      app.kubernetes.io/name: buzz-agent-prime
 
 resources:
+  - namespace.yaml
   - statefulset.yaml
+  - service.yaml
+  - network-policy.yaml
 
 patches:
   - target:
@@ -17,8 +21,6 @@ patches:
       - op: add
         path: /spec/template/metadata/labels/app.kubernetes.io~1version
         value: "0.1.0"
-  - service.yaml
-  - network-policy.yaml
 
 configMapGenerator:
   - name: buzz-agent-prime-config
@@ -30,9 +32,8 @@ configMapGenerator:
 
 # Secrets are NOT in the base.  The base references an independently
 # provisioned Secret named `buzz-agent-prime-secrets` (created by your
-# overlay, ExternalSecret, or Warden).  The example overlay in
-# `deploy/kubernetes/overlays/example/` shows a sample Secret with
-# placeholder values.
+# environment, ExternalSecret, or Warden). The example overlay uses the same
+# stable external Secret reference and contains no credentials.
 #
-# A real production overlay MUST remove the example generator and wire
-# an ExternalSecret CR (or equivalent) through the cluster's IaC.
+# A production overlay can wire an ExternalSecret CR (or equivalent) through
+# the cluster's IaC, targeting that exact Secret name.

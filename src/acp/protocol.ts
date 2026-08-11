@@ -126,8 +126,8 @@ export interface NewSessionResult {
 /** The `initialize` result we send to the outer client. */
 export interface InitializeResult {
   protocolVersion: number;
-  info: { name: string; title?: string; version: string };
-  capabilities: Record<string, unknown>;
+  agentInfo: { name: string; title?: string; version: string };
+  agentCapabilities: Record<string, unknown>;
   authMethods?: unknown[];
   _meta?: Record<string, unknown>;
 }

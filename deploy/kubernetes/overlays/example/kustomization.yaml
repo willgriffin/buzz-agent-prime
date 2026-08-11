@@ -8,12 +8,9 @@ resources:
 
 nameSuffix: -example
 
-secretGenerator:
-  - name: buzz-agent-prime-secrets
-    behavior: merge
-    literals:
-      - BUZZ_PRIVATE_KEY=change-me-nsec-or-hex
-      - OPENAI_API_KEY=change-me
+# Provision buzz-agent-prime-secrets before applying this overlay. It is an
+# external, stable Secret reference: the sample deliberately contains no
+# credentials or secret generator. See docs/deployment/kubernetes.md.
 
 # Override relay URL for a specific environment.
 configMapGenerator:

@@ -1,0 +1,5 @@
+# hv-agent: the dedicated lifecycle workflow is byte-canonical policy output; prettier must not rewrite it
+.github/workflows/agent-policy.yml
+
+# hv-agent: project configuration is strict JSON-compatible YAML; the repository formatter requires trailing commas
+.agents/project.yaml

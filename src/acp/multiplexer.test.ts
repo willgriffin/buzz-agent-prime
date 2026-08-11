@@ -3,7 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AcpHarmess, notification, request, startAcp, successResponse } from "./test-utils.js";
+import { Logger } from "./io.js";
 import { JSONRPC_ERROR, PROTOCOL_VERSION } from "./protocol.js";
+
+class CapturingLogger extends Logger {
+  readonly errors: string[] = [];
+  readonly infos: string[] = [];
+
+  override error(message: string, ...details: unknown[]): void {
+    this.errors.push([message, ...details.map(String)].join(" "));
+  }
+
+  override info(message: string): void {
+    this.infos.push(message);
+  }
+}
 
 function tempCwd(label: string): string {
   // spawn() resolves the child cwd via realpath (macOS /var -> /private/var),
@@ -55,19 +69,19 @@ async function stopAll() {
 afterEach(stopAll);
 
 describe("ACP multiplexer: initialize", () => {
-  it("probes prime-agent and preserves capabilities + namespaced metadata", async () => {
+  it("probes prime-agent and returns standard ACP fields with namespaced metadata", async () => {
     const h = harness();
     const init = await initialize(h);
     const result = init.result as Record<string, unknown>;
     expect(result.protocolVersion).toBe(PROTOCOL_VERSION);
-    expect(result.info).toMatchObject({ name: "buzz-agent-prime", title: "Buzz Agent Prime" });
-    expect(result.capabilities).toMatchObject({
+    expect(result.agentInfo).toMatchObject({ name: "buzz-agent-prime", title: "Buzz Agent Prime" });
+    expect(result.agentCapabilities).toMatchObject({
       loadSession: false,
       promptCapabilities: { image: true, embeddedContext: true },
       sessionCapabilities: { close: {} },
     });
     const meta = result._meta as Record<string, unknown>;
-    expect(meta["ai.primeintellect.prime-agent"]).toMatchObject({ probe: true });
+    expect(meta["ai.primeintellect.prime-agent"]).toEqual({});
     const buzz = meta["ai.buzz.buzz-agent-prime"] as Record<string, unknown>;
     expect(buzz).toMatchObject({ multiplexer: { protocolVersion: 2, maxSessions: 4 } });
   });
@@ -132,6 +146,19 @@ describe("ACP multiplexer: session lifecycle and update routing", () => {
 
     h.send(request(12, "session/close", { sessionId: outerId }));
     expect(await responseFor(h, 12)).toEqual(successResponse(12, {}));
+  });
+
+  it("does not report or error-log a child stopped by session/close", async () => {
+    const logger = new CapturingLogger();
+    const h = harness({ runOptions: { logger } });
+    await initialize(h);
+    const sid = await newSession(h, 1, tempCwd("clean-close"));
+
+    h.send(request(2, "session/close", { sessionId: sid }));
+    expect(await responseFor(h, 2)).toEqual(successResponse(2, {}));
+
+    expect(childExitUpdates(h, sid)).toEqual([]);
+    expect(logger.errors).toEqual([]);
   });
 
   it("rejects prompt/close for an unknown session", async () => {
@@ -287,13 +314,19 @@ describe("ACP multiplexer: failure isolation", () => {
     expect(err.code).toBe(JSONRPC_ERROR.internalError);
     // The crash is surfaced as namespaced metadata so a harness can tell an
     // agent-chosen stop from a subprocess death.
-    await h.nextFrame((f) => {
+    const childExit = await h.nextFrame((f) => {
       if (f.method !== "session/update") return false;
       const p = f.params as Record<string, unknown>;
       if (p.sessionId !== crashing) return false;
       const u = p.update as Record<string, unknown>;
       return u.sessionUpdate === "session_info_update";
     }, 8_000);
+    expect(childExitMetadata(childExit)).toMatchObject({
+      sessionId: crashing,
+      code: 3,
+      signal: null,
+      reason: "crashed",
+    });
 
     // The healthy session is unaffected.
     h.send(
@@ -309,6 +342,31 @@ describe("ACP multiplexer: failure isolation", () => {
 
     h.send(request(5, "session/close", { sessionId: healthy }));
     await responseFor(h, 5);
+  });
+
+  it("reports a signal-terminated child and fails its pending prompt", async () => {
+    const h = harness();
+    await initialize(h);
+    const sid = await newSession(h, 1, tempCwd("signal-exit"), {
+      instance: "signal-exit",
+      signalOnPrompt: "SIGTERM",
+    });
+
+    h.send(request(2, "session/prompt", { sessionId: sid, prompt: [{ type: "text", text: "x" }] }));
+    const prompt = await responseFor(h, 2, 8_000);
+    expect((prompt.error as Record<string, unknown>).code).toBe(JSONRPC_ERROR.internalError);
+
+    const childExit = await h.nextFrame(
+      (f) =>
+        f.method === "session/update" && (f.params as Record<string, unknown>).sessionId === sid,
+      8_000,
+    );
+    expect(childExitMetadata(childExit)).toMatchObject({
+      sessionId: sid,
+      code: null,
+      signal: "SIGTERM",
+      reason: "crashed",
+    });
   });
 });
 
@@ -377,6 +435,17 @@ describe("ACP multiplexer: shutdown", () => {
     expect(code).toBe(0);
   });
 
+  it("does not report or error-log children stopped by adapter shutdown", async () => {
+    const logger = new CapturingLogger();
+    const h = harness({ runOptions: { logger } });
+    await initialize(h);
+    const sid = await newSession(h, 1, tempCwd("adapter-shutdown"));
+
+    expect(await h.close()).toBe(0);
+    expect(childExitUpdates(h, sid)).toEqual([]);
+    expect(logger.errors).toEqual([]);
+  });
+
   it("ignores notifications for unknown sessions", async () => {
     const h = harness();
     await initialize(h);
@@ -387,6 +456,34 @@ describe("ACP multiplexer: shutdown", () => {
     expect((resp.result as Record<string, unknown>).protocolVersion).toBe(PROTOCOL_VERSION);
   });
 });
+
+function childExitUpdates(h: AcpHarmess, sessionId: string): Record<string, unknown>[] {
+  return h.frames().filter((frame) => {
+    if (frame.method !== "session/update") return false;
+    const params = frame.params as Record<string, unknown>;
+    if (
+      params.sessionId !== sessionId ||
+      typeof params.update !== "object" ||
+      params.update === null
+    ) {
+      return false;
+    }
+    const meta = (params.update as Record<string, unknown>)._meta;
+    if (typeof meta !== "object" || meta === null) return false;
+    const buzz = (meta as Record<string, unknown>)["ai.buzz.buzz-agent-prime"];
+    return typeof buzz === "object" && buzz !== null && Object.hasOwn(buzz, "childExited");
+  });
+}
+
+function childExitMetadata(frame: Record<string, unknown>): Record<string, unknown> {
+  const params = frame.params as Record<string, unknown>;
+  const update = params.update as Record<string, unknown>;
+  const meta = update._meta as Record<string, unknown>;
+  return (meta["ai.buzz.buzz-agent-prime"] as Record<string, unknown>).childExited as Record<
+    string,
+    unknown
+  >;
+}
 
 describe("ACP multiplexer: default cwd", () => {
   it("uses the default working directory when session/new omits cwd", async () => {

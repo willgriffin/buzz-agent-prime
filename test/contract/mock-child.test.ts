@@ -90,7 +90,11 @@ async function init(send: (f: Record<string, unknown>) => void): Promise<void> {
     jsonrpc: "2.0",
     id: 1,
     method: "initialize",
-    params: { protocolVersion: 2, info: { name: "test", version: "0" } },
+    params: {
+      protocolVersion: 2,
+      clientCapabilities: {},
+      clientInfo: { name: "test", version: "0" },
+    },
   });
   await new Promise((r) => setTimeout(r, 100));
 }
@@ -116,7 +120,7 @@ describe("Mock ACP child — protocol compliance", () => {
     const initResp = frames.find((f) => f["id"] === 1 && f["result"]) as JsonRpcResult | undefined;
     expect(initResp).toBeDefined();
     expect(initResp!.result).toHaveProperty("protocolVersion", 2);
-    expect(initResp!.result).toHaveProperty("info.name", "mock-prime-agent");
+    expect(initResp!.result).toHaveProperty("agentInfo.name", "mock-prime-agent");
   });
 
   it("creates a new session with a unique session ID", async () => {
@@ -350,7 +354,11 @@ describe("Mock ACP child — unknown method", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "initialize",
-        params: { protocolVersion: 2, info: { name: "test", version: "0" } },
+        params: {
+          protocolVersion: 2,
+          clientCapabilities: {},
+          clientInfo: { name: "test", version: "0" },
+        },
       });
       await new Promise((r) => setTimeout(r, 100));
       send({ jsonrpc: "2.0", id: 99, method: "unknown/method", params: {} });
