@@ -50,6 +50,7 @@ describe("Cancellation — active work", () => {
 
       // Start a prompt (it'll take ~1s because of responseDelayMs)
       const promptPromise = client.prompt(session.sessionId, "long running");
+      void promptPromise.catch(() => undefined);
 
       // Wait for work to start, then cancel
       await new Promise((r) => setTimeout(r, 200));
@@ -82,6 +83,7 @@ describe("Cancellation — session survives cancellation", () => {
 
       // Start and cancel a prompt
       const promptPromise = client.prompt(session.sessionId, "cancel me");
+      void promptPromise.catch(() => undefined);
       await new Promise((r) => setTimeout(r, 200));
       client.cancel(session.sessionId);
       await new Promise((r) => setTimeout(r, 600));
