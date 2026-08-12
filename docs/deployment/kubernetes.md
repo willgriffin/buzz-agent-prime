@@ -3,7 +3,9 @@
 `buzz-agent-prime` runs as a one-replica StatefulSet in the `buzz-agents`
 namespace. Its `buzz-agent-prime-state` volume claim template provides the
 persistent state needed to recover named Prime sessions after a pod
-replacement. Do not scale this deployment above one replica in v0.1.
+replacement. The same PVC provides `/workspace` through its `workspace`
+subpath, so repository checkouts and uncommitted working-tree changes survive
+replacement too. Do not scale this deployment above one replica in v0.1.
 
 ## Prerequisites
 
@@ -105,8 +107,11 @@ kubectl -n buzz-agents get statefulset,pod,pvc
 kubectl -n buzz-agents describe pod buzz-agent-prime-example-0
 ```
 
-The rendered template mounts `buzz-agent-prime-state` directly, so the ordinal
-pod receives the StatefulSet-generated PVC
+The rendered template mounts `buzz-agent-prime-state` directly at the state
+directory and mounts its pre-created `workspace` subpath at `/workspace`. A
+non-root init container creates that subpath before the application starts;
+this is required because Kubernetes does not create missing subpaths. The
+ordinal pod receives the StatefulSet-generated PVC
 `buzz-agent-prime-state-buzz-agent-prime-example-0` (the base uses
 `buzz-agent-prime-state-buzz-agent-prime-0`). This preserves the established
 PVC identity on an ordinary pod-template rollout; no StatefulSet recreation or
@@ -140,7 +145,8 @@ is not sufficient proof of session recovery.
 ## Operations
 
 - Back up the PVC-mounted `/var/lib/buzz-agent-prime` directory; see
-  [Backup and Restore](backup.md).
+  [Backup and Restore](backup.md). It includes the workspace subpath, so one
+  consistent PVC backup covers session state and repository checkouts.
 - Update the image with `kubectl set image statefulset/buzz-agent-prime ...`;
   StatefulSet replacement retains the ordinal PVC.
 - The NetworkPolicy allows DNS plus HTTPS/SSH egress needed for the relay,

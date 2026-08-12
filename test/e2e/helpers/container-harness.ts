@@ -7,11 +7,13 @@
  * - Inspect container state and volumes
  * - Simulate PVC-style persistence via Docker volumes
  *
- * All Docker operations are wrapped in try/catch so tests can skip
- * gracefully when Docker is not available (e.g., in CI without Docker).
+ * Docker scenarios are opt-in. Every invoked Docker command has a bounded
+ * process-group timeout so an unavailable CLI or daemon fails cleanly.
  */
 
-import { execFileSync } from "node:child_process";
+import { runDockerCommand } from "../../helpers/docker.js";
+
+export { isDockerAvailable, isDockerImageAvailable } from "../../helpers/docker.js";
 
 export interface ContainerConfig {
   /** Container name prefix (suffixed with random ID). */
@@ -22,12 +24,29 @@ export interface ContainerConfig {
   env?: Record<string, string>;
   /** Volume mounts: { hostPath: containerPath } or { volumeName: containerPath }. */
   volumes?: Record<string, string>;
+  /** Explicit Docker volume mounts, including Kubernetes-style subpaths. */
+  mounts?: ContainerMount[];
   /** Ports to expose: { containerPort: hostPort }. */
   ports?: Record<number, number>;
   /** Command to run. */
   command?: string[];
   /** Working directory inside container. */
   workdir?: string;
+  /** Override the image entrypoint for a credential-free fixture. */
+  entrypoint?: string;
+  /** Run with an immutable root filesystem. */
+  readOnlyRootFilesystem?: boolean;
+  /** Writable temporary filesystems needed with an immutable root filesystem. */
+  tmpfs?: string[];
+}
+
+export interface ContainerMount {
+  /** Docker volume name. */
+  source: string;
+  /** Destination path in the container. */
+  target: string;
+  /** Existing directory inside the volume to mount, like a Kubernetes subPath. */
+  subPath?: string;
 }
 
 export interface ContainerInfo {
@@ -38,42 +57,19 @@ export interface ContainerInfo {
 }
 
 /**
- * Check if Docker is available on the system.
- */
-export function isDockerAvailable(): boolean {
-  try {
-    execFileSync("docker", ["info"], { stdio: "pipe", timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Run a Docker command and return stdout.
- */
-function docker(args: string[]): string {
-  return execFileSync("docker", args, {
-    stdio: ["pipe", "pipe", "pipe"],
-    encoding: "utf-8",
-    timeout: 30000,
-  }).trim();
-}
-
-/**
  * Create a Docker volume for PVC-style persistence testing.
  */
-export function createVolume(name: string): string {
-  docker(["volume", "create", name]);
+export async function createVolume(name: string): Promise<string> {
+  await runDockerCommand(["volume", "create", name]);
   return name;
 }
 
 /**
  * Remove a Docker volume.
  */
-export function removeVolume(name: string): void {
+export async function removeVolume(name: string): Promise<void> {
   try {
-    docker(["volume", "rm", "-f", name]);
+    await runDockerCommand(["volume", "rm", "-f", name]);
   } catch {
     // ignore
   }
@@ -83,8 +79,22 @@ export function removeVolume(name: string): void {
  * Start a container with the given configuration.
  * Returns the container ID.
  */
-export function startContainer(config: ContainerConfig): string {
+export async function startContainer(config: ContainerConfig): Promise<string> {
   const args = ["run", "-d", "--name", config.name];
+
+  if (config.readOnlyRootFilesystem) {
+    args.push("--read-only");
+  }
+
+  if (config.tmpfs) {
+    for (const mount of config.tmpfs) {
+      args.push("--tmpfs", mount);
+    }
+  }
+
+  if (config.entrypoint) {
+    args.push("--entrypoint", config.entrypoint);
+  }
 
   if (config.env) {
     for (const [k, v] of Object.entries(config.env)) {
@@ -95,6 +105,14 @@ export function startContainer(config: ContainerConfig): string {
   if (config.volumes) {
     for (const [host, container] of Object.entries(config.volumes)) {
       args.push("-v", `${host}:${container}`);
+    }
+  }
+
+  if (config.mounts) {
+    for (const mount of config.mounts) {
+      const fields = ["type=volume", `src=${mount.source}`, `dst=${mount.target}`];
+      if (mount.subPath) fields.push(`volume-subpath=${mount.subPath}`);
+      args.push("--mount", fields.join(","));
     }
   }
 
@@ -114,15 +132,15 @@ export function startContainer(config: ContainerConfig): string {
     args.push(...config.command);
   }
 
-  return docker(args);
+  return await runDockerCommand(args);
 }
 
 /**
  * Stop a container (graceful, then SIGKILL after 10s).
  */
-export function stopContainer(name: string): void {
+export async function stopContainer(name: string): Promise<void> {
   try {
-    docker(["stop", "-t", "10", name]);
+    await runDockerCommand(["stop", "-t", "10", name], { timeoutMs: 15000 });
   } catch {
     // ignore
   }
@@ -131,16 +149,16 @@ export function stopContainer(name: string): void {
 /**
  * Restart a stopped container.
  */
-export function restartContainer(name: string): void {
-  docker(["start", name]);
+export async function restartContainer(name: string): Promise<void> {
+  await runDockerCommand(["start", name]);
 }
 
 /**
  * Remove a container (force).
  */
-export function removeContainer(name: string): void {
+export async function removeContainer(name: string): Promise<void> {
   try {
-    docker(["rm", "-f", name]);
+    await runDockerCommand(["rm", "-f", name]);
   } catch {
     // ignore
   }
@@ -149,8 +167,8 @@ export function removeContainer(name: string): void {
 /**
  * Get container info (status, running state).
  */
-export function getContainerInfo(name: string): ContainerInfo {
-  const inspect = docker([
+export async function getContainerInfo(name: string): Promise<ContainerInfo> {
+  const inspect = await runDockerCommand([
     "inspect",
     "--format",
     "{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}",
@@ -168,15 +186,15 @@ export function getContainerInfo(name: string): ContainerInfo {
 /**
  * Execute a command inside a running container and return stdout.
  */
-export function execInContainer(name: string, command: string[]): string {
-  return docker(["exec", name, ...command]);
+export async function execInContainer(name: string, command: string[]): Promise<string> {
+  return await runDockerCommand(["exec", name, ...command]);
 }
 
 /**
  * Get container logs.
  */
-export function getContainerLogs(name: string): string {
-  return docker(["logs", name]);
+export async function getContainerLogs(name: string): Promise<string> {
+  return await runDockerCommand(["logs", name]);
 }
 
 /**
@@ -186,7 +204,7 @@ export async function waitForContainerRunning(name: string, timeoutMs = 30000): 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const info = getContainerInfo(name);
+      const info = await getContainerInfo(name);
       if (info.running) return true;
     } catch {
       // container might not exist yet

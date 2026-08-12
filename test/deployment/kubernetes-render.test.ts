@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const basePath = resolve(repositoryRoot, "deploy/kubernetes/base");
 const examplePath = resolve(repositoryRoot, "deploy/kubernetes/overlays/example");
+const composePath = resolve(repositoryRoot, "deploy/docker/docker-compose.yml");
+const dockerRunPath = resolve(repositoryRoot, "deploy/docker/run.sh");
 const kubectlAvailable =
   spawnSync("kubectl", ["version", "--client"], {
     stdio: "ignore",
@@ -48,12 +50,20 @@ function assertRenderedStatefulSet(path: string, expectedName: string): void {
   expect(statefulSet).toContain("namespace: buzz-agents");
   expect(statefulSet).toContain("name: buzz-agent-prime-secrets");
   expect(statefulSet).toContain("runAsNonRoot: true");
+  expect(statefulSet).toContain("runAsGroup: 1001");
   expect(statefulSet).toContain("readOnlyRootFilesystem: true");
   expect(statefulSet).toContain("allowPrivilegeEscalation: false");
   expect(statefulSet).toContain("- ALL");
   expect(statefulSet).toContain("type: RuntimeDefault");
   expect(statefulSet).toContain("terminationGracePeriodSeconds: 30");
   expect(statefulSet).toContain("resources:");
+  expect(statefulSet).toContain("name: initialize-workspace");
+  expect(statefulSet).toMatch(
+    /initContainers:[\s\S]*?image: ghcr\.io\/willgriffin\/buzz-agent-prime:0\.1\.0[\s\S]*?name: initialize-workspace/,
+  );
+  expect(statefulSet).toContain("mkdir -p /var/lib/buzz-agent-prime/workspace");
+  expect(statefulSet).toContain("mountPath: /workspace");
+  expect(statefulSet).toContain("subPath: workspace");
 
   const mounts = namesIn(
     statefulSet.match(/        volumeMounts:\n([\s\S]*?)\n      securityContext:/)?.[1] ?? "",
@@ -74,6 +84,17 @@ function assertRenderedStatefulSet(path: string, expectedName: string): void {
 }
 
 describe("Kubernetes kustomizations", () => {
+  it("keeps Docker and Compose workspaces on named persistent volumes", () => {
+    const compose = readFileSync(composePath, "utf8");
+    const dockerRun = readFileSync(dockerRunPath, "utf8");
+
+    expect(compose).toContain("- agent-state:/var/lib/buzz-agent-prime");
+    expect(compose).toContain("- agent-workspace:/workspace");
+    expect(compose).toMatch(/agent-workspace:\n    name: buzz-agent-prime-workspace/);
+    expect(dockerRun).toContain("--volume buzz-agent-prime-state:/var/lib/buzz-agent-prime");
+    expect(dockerRun).toContain("--volume buzz-agent-prime-workspace:/workspace");
+  });
+
   it("declares Service and NetworkPolicy as resources, not patches", () => {
     const baseKustomization = readFileSync(resolve(basePath, "kustomization.yaml"), "utf8");
 
